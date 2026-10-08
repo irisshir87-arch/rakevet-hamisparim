@@ -87,6 +87,22 @@ const sharedOnlineAudio = new Audio();
 sharedOnlineAudio.preload = "auto";
 sharedOnlineAudio.playsInline = true;
 
+// Critical number pronunciations use real Hebrew recordings instead of TTS.
+// These files are hosted by Wikimedia Commons and are used under CC BY-SA.
+// The starting level (1–5) is therefore independent of the device's TTS engine.
+const NUMBER_AUDIO_URLS = {
+  1: "https://upload.wikimedia.org/wikipedia/commons/c/c0/He-il-akhat.ogg",
+  2: "https://upload.wikimedia.org/wikipedia/commons/1/16/He-il-shtaim.ogg",
+  3: "https://upload.wikimedia.org/wikipedia/commons/2/26/He-il-shalosh.ogg",
+  4: "https://upload.wikimedia.org/wikipedia/commons/1/11/He-il-arba.ogg",
+  5: "https://upload.wikimedia.org/wikipedia/commons/2/2c/He-il-khamesh.ogg",
+  6: "https://upload.wikimedia.org/wikipedia/commons/4/4f/He-il-shesh.ogg",
+  7: "https://upload.wikimedia.org/wikipedia/commons/2/2b/He-il-sheva.ogg"
+};
+const sharedNumberAudio = new Audio();
+sharedNumberAudio.preload = "auto";
+sharedNumberAudio.playsInline = true;
+
 function refreshHebrewVoice() {
   hebrewVoice = null;
   availableVoices = [];
@@ -140,6 +156,12 @@ function stopActiveSpeech() {
     } catch (_) {}
     activeOnlineAudio = null;
   }
+  try {
+    sharedNumberAudio.pause();
+    sharedNumberAudio.currentTime = 0;
+    sharedNumberAudio.onended = null;
+    sharedNumberAudio.onerror = null;
+  } catch (_) {}
 }
 
 function resetSpeechQueue() {
@@ -291,6 +313,67 @@ function speakNow(text) {
   return speak(text);
 }
 
+function playRecordedNumber(number, session) {
+  return new Promise(resolve => {
+    if (session !== speechSession || !state.sound) {
+      resolve(false);
+      return;
+    }
+    const url = NUMBER_AUDIO_URLS[number];
+    if (!url) {
+      playHebrewSpeech(NUMBER_WORDS[number], session).then(resolve);
+      return;
+    }
+
+    const audio = sharedNumberAudio;
+    let settled = false;
+    let timeoutId = null;
+    const finish = result => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      audio.onended = null;
+      audio.onerror = null;
+      resolve(result);
+    };
+
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.volume = 1;
+      audio.src = url;
+      audio.onended = () => finish(true);
+      audio.onerror = () => {
+        // If a recording cannot load, fall back to the existing Hebrew TTS path.
+        playHebrewSpeech(NUMBER_WORDS[number], session).then(finish);
+      };
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.catch === "function") {
+        playPromise.catch(() => playHebrewSpeech(NUMBER_WORDS[number], session).then(finish));
+      }
+      timeoutId = setTimeout(() => finish(false), 4500);
+    } catch (_) {
+      playHebrewSpeech(NUMBER_WORDS[number], session).then(finish);
+    }
+  });
+}
+
+function speakNumber(number) {
+  if (!state.sound || !number) return Promise.resolve(false);
+  const session = speechSession;
+  const task = () => {
+    if (session !== speechSession || !state.sound) return false;
+    return playRecordedNumber(number, session);
+  };
+  speechQueue = speechQueue.catch(() => false).then(task);
+  return speechQueue;
+}
+
+function speakNumberNow(number) {
+  resetSpeechQueue();
+  return speakNumber(number);
+}
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -367,7 +450,7 @@ function renderHome() {
       screen.replaceChildren();
       renderHome();
       showToast(`עכשיו משחקים עם המספרים 1 עד ${state.range}`);
-      speak(`שלב אחד עד ${NUMBER_WORDS[state.range]}`);
+      speakNumber(state.range);
     });
   });
   const progress = screen.querySelector("#homeProgress");
@@ -436,10 +519,10 @@ async function runRaceCountdown() {
   }
   state.catchLocked = true;
   const steps = [
-    { visual: "3", spoken: "שלוש" },
-    { visual: "2", spoken: "שתיים" },
-    { visual: "1", spoken: "אחת" },
-    { visual: "סע!", spoken: "סע" }
+    { visual: "3", number: 3 },
+    { visual: "2", number: 2 },
+    { visual: "1", number: 1 },
+    { visual: "סע!", number: null }
   ];
 
   for (let index = 0; index < steps.length; index++) {
@@ -449,7 +532,8 @@ async function runRaceCountdown() {
     void countdown.offsetWidth;
     countdown.classList.add("show", "pop");
     playTone(index < 3 ? 420 + index * 90 : 760, index < 3 ? 0.1 : 0.18);
-    await speak(steps[index].spoken);
+    if (steps[index].number) await speakNumber(steps[index].number);
+    else await sleep(260);
     await sleep(80);
   }
 
@@ -472,8 +556,8 @@ async function announceCatchTarget(isRepeat = false) {
   });
 
   if (!isRepeat) state.catchLocked = true;
-  const player = isRepeat ? speakNow : speak;
-  await player(`לחץ על המספר ${NUMBER_WORDS[targetAtStart]}`);
+  const player = isRepeat ? speakNumberNow : speakNumber;
+  await player(targetAtStart);
   if (!isRepeat && state.route === "catch" && state.catchTarget === targetAtStart) {
     state.catchLocked = false;
   }
@@ -503,7 +587,7 @@ async function checkCatchNumber(number, button) {
     playTone(185, 0.15);
     const feedback = screen.querySelector("#raceFeedback");
     if (feedback) feedback.textContent = "↻";
-    await speakNow(`נסה שוב. לחץ על המספר ${NUMBER_WORDS[state.catchTarget]}`);
+    await speakNumberNow(state.catchTarget);
     return;
   }
 
@@ -525,7 +609,7 @@ async function checkCatchNumber(number, button) {
   setTimeout(() => car.classList.remove("boost"), 520);
 
   // Finish the success narration before creating the next mission.
-  await speak(`כל הכבוד! ${NUMBER_WORDS[number]}`);
+  await speakNumber(number);
   if (state.route !== "catch") return;
   await sleep(140);
 
@@ -610,9 +694,9 @@ function renderTrain() {
     });
     tray.appendChild(object);
   }
-  speak(trainInstructionText(target));
+  speakNumber(target);
   const repeatTrainBtn = screen.querySelector("#repeatTrainBtn");
-  if (repeatTrainBtn) repeatTrainBtn.addEventListener("click", () => speakNow(trainInstructionText(target)));
+  if (repeatTrainBtn) repeatTrainBtn.addEventListener("click", () => speakNumberNow(target));
 }
 
 function attachPointerDrag(object) {
@@ -673,7 +757,7 @@ function addItemToWagon(wagonNumber, source) {
     wagon?.classList.add("wrong");
     playTone(190, 0.18);
     showToast(`זה קרון ${wagonNumber}. חפשו את קרון ${target}`);
-    speak(`זה קרון ${NUMBER_WORDS[wagonNumber]}. חפשו את קרון ${NUMBER_WORDS[target]}.`);
+    speakNumberNow(target);
     return;
   }
 
@@ -685,7 +769,7 @@ function addItemToWagon(wagonNumber, source) {
   item.textContent = ITEM;
   cargo.appendChild(item);
   playTone(420 + state.trainCounts[target] * 35, 0.1);
-  speak(COUNT_WORDS[state.trainCounts[target]]);
+  speakNumber(state.trainCounts[target]);
   if (state.trainCounts[target] === target) completeTrainRound(wagon, target);
 }
 
@@ -699,7 +783,7 @@ async function completeTrainRound(wagon, target) {
   showToast(`מצוין! בקרון ${target} יש ${ITEM_WORDS[target]} ⭐`, "success");
 
   // If the last apple was still being counted aloud, this sentence waits for it.
-  await speak(`כל הכבוד! זה המספר ${NUMBER_WORDS[target]}. בקרון יש ${ITEM_WORDS[target]}.`);
+  await speakNumber(target);
   if (state.route !== "train") return;
   await sleep(180);
 
@@ -760,7 +844,7 @@ async function checkMissingAnswer(number, button) {
     safeSet("numberTrainMissingScore", String(state.missingScore));
     celebrate();
     showToast(`נכון! המספר החסר הוא ${number}`, "success");
-    await speak(`נכון מאוד! המספר החסר הוא ${NUMBER_WORDS[number]}.`);
+    await speakNumber(number);
     if (state.route !== "missing") return;
     await sleep(160);
     renderMissing(true);
@@ -796,7 +880,7 @@ soundBtn.addEventListener("click", () => {
   soundBtn.textContent = state.sound ? "🔊" : "🔇";
   if (state.sound) {
     primeAudioFromGesture();
-    speakNow("שלום אלון, הקול עובד בעברית");
+    speakNumberNow(1);
   } else {
     resetSpeechQueue();
   }
