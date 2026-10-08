@@ -838,6 +838,147 @@ fullscreenBtn.addEventListener("click", async () => {
     showToast("הדפדפן לא מאפשר כרגע מסך מלא");
   }
 });
+
+// ---------- Android / tablet sound activation gate ----------
+let soundGateDismissed = false;
+
+function showSoundGate() {
+  // Force sound ON for this fresh tablet session. A previous test may have
+  // persisted the mute setting in localStorage.
+  state.sound = true;
+  safeSet("numberTrainSound", "on");
+  soundBtn.textContent = "🔊";
+
+  const old = document.getElementById("soundStartGate");
+  if (old) old.remove();
+
+  const gate = document.createElement("div");
+  gate.id = "soundStartGate";
+  gate.setAttribute("role", "dialog");
+  gate.setAttribute("aria-label", "הפעלת קול");
+  gate.style.cssText = [
+    "position:fixed",
+    "inset:0",
+    "z-index:99999",
+    "display:flex",
+    "align-items:center",
+    "justify-content:center",
+    "background:rgba(255,248,235,.96)",
+    "padding:24px",
+    "direction:rtl"
+  ].join(";");
+
+  const card = document.createElement("div");
+  card.style.cssText = [
+    "max-width:520px",
+    "width:min(92vw,520px)",
+    "background:white",
+    "border-radius:28px",
+    "padding:28px",
+    "text-align:center",
+    "box-shadow:0 18px 50px rgba(0,0,0,.14)"
+  ].join(";");
+
+  const icon = document.createElement("div");
+  icon.textContent = "🔊";
+  icon.style.cssText = "font-size:64px;line-height:1;margin-bottom:10px";
+
+  const title = document.createElement("div");
+  title.textContent = "מפעילים קול";
+  title.style.cssText = "font-size:32px;font-weight:800;margin-bottom:8px;color:#243447";
+
+  const text = document.createElement("div");
+  text.textContent = "לחצו פעם אחת כדי שהטאבלט יאפשר למשחק לדבר בעברית";
+  text.style.cssText = "font-size:20px;line-height:1.45;margin-bottom:22px;color:#52606d";
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "הפעל קול ▶";
+  button.style.cssText = [
+    "min-width:220px",
+    "min-height:64px",
+    "border:0",
+    "border-radius:20px",
+    "font-size:25px",
+    "font-weight:800",
+    "cursor:pointer",
+    "background:#ffd56a",
+    "color:#243447"
+  ].join(";");
+
+  const status = document.createElement("div");
+  status.style.cssText = "min-height:28px;margin-top:12px;font-size:16px;color:#6b7280";
+
+  card.append(icon,title,text,button,status);
+  gate.appendChild(card);
+  document.body.appendChild(gate);
+
+  button.addEventListener("click", () => {
+    state.sound = true;
+    safeSet("numberTrainSound", "on");
+    soundBtn.textContent = "🔊";
+    button.disabled = true;
+    button.textContent = "מפעיל...";
+    status.textContent = "";
+
+    // IMPORTANT: call play() directly inside the click handler. This is the
+    // most reliable way to satisfy Android's user-gesture media policy.
+    refreshHebrewVoice();
+
+    const finishSuccess = () => {
+      if (soundGateDismissed) return;
+      soundGateDismissed = true;
+      audioUnlocked = true;
+      button.textContent = "הקול פועל ✓";
+      status.textContent = "";
+      setTimeout(() => gate.remove(), 550);
+    };
+
+    const tryOnline = () => {
+      try {
+        sharedOnlineAudio.pause();
+        sharedOnlineAudio.currentTime = 0;
+        sharedOnlineAudio.volume = 1;
+        sharedOnlineAudio.src = onlineTtsUrls("שלום אלון, מתחילים לשחק")[0];
+        sharedOnlineAudio.onplaying = finishSuccess;
+        sharedOnlineAudio.onerror = () => {
+          button.disabled = false;
+          button.textContent = "נסה שוב 🔊";
+          status.textContent = "הקול לא הופעל. לחצו שוב פעם אחת.";
+        };
+        const promise = sharedOnlineAudio.play();
+        if (promise && typeof promise.catch === "function") {
+          promise.catch(() => {
+            button.disabled = false;
+            button.textContent = "נסה שוב 🔊";
+            status.textContent = "הטאבלט חסם את הקול. לחצו שוב.";
+          });
+        }
+      } catch (_) {
+        button.disabled = false;
+        button.textContent = "נסה שוב 🔊";
+        status.textContent = "הקול לא הופעל. לחצו שוב.";
+      }
+    };
+
+    if (hebrewVoice && "speechSynthesis" in window) {
+      try {
+        const u = new SpeechSynthesisUtterance("שלום אלון, מתחילים לשחק");
+        u.lang = "he-IL";
+        u.voice = hebrewVoice;
+        u.rate = 0.82;
+        u.onstart = finishSuccess;
+        u.onerror = tryOnline;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(u);
+      } catch (_) {
+        tryOnline();
+      }
+    } else {
+      tryOnline();
+    }
+  });
+}
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) clearRouteTimers();
 });
@@ -845,3 +986,4 @@ document.addEventListener("visibilitychange", () => {
 soundBtn.textContent = state.sound ? "🔊" : "🔇";
 safeSet("numberTrainRange", String(state.range));
 setRoute("home");
+showSoundGate();
