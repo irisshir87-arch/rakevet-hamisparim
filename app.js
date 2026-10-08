@@ -81,6 +81,48 @@ let speechMode = "unknown";
 let speechSession = 0;
 let speechQueue = Promise.resolve();
 
+// Android / Samsung browsers block media until the first real user gesture.
+// We unlock one persistent audio element on the first tap and reuse it for
+// all online Hebrew narration afterwards.
+const sharedOnlineAudio = new Audio();
+sharedOnlineAudio.preload = "auto";
+sharedOnlineAudio.playsInline = true;
+const SILENT_AUDIO_SRC = "data:audio/wav;base64,UklGRiQFAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+let audioUnlocked = false;
+let audioUnlockPromise = null;
+
+function unlockAudioFromGesture() {
+  if (audioUnlocked) return Promise.resolve(true);
+  if (audioUnlockPromise) return audioUnlockPromise;
+
+  refreshHebrewVoice();
+  if ("speechSynthesis" in window) {
+    try { window.speechSynthesis.resume(); } catch (_) {}
+  }
+
+  audioUnlockPromise = (async () => {
+    try {
+      sharedOnlineAudio.pause();
+      sharedOnlineAudio.src = SILENT_AUDIO_SRC;
+      sharedOnlineAudio.volume = 0.01;
+      sharedOnlineAudio.currentTime = 0;
+      const result = sharedOnlineAudio.play();
+      if (result && typeof result.then === "function") await result;
+      sharedOnlineAudio.pause();
+      sharedOnlineAudio.currentTime = 0;
+      sharedOnlineAudio.volume = 1;
+      audioUnlocked = true;
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      audioUnlockPromise = null;
+    }
+  })();
+
+  return audioUnlockPromise;
+}
+
 function refreshHebrewVoice() {
   hebrewVoice = null;
   if (!("speechSynthesis" in window)) return;
@@ -169,15 +211,20 @@ function playLocalHebrew(text, session) {
   });
 }
 
-function playOnlineHebrew(text, session, urlIndex = 0) {
+async function playOnlineHebrew(text, session, urlIndex = 0) {
   const urls = onlineTtsUrls(text);
   if (session !== speechSession || !state.sound || urlIndex >= urls.length) {
-    return Promise.resolve(false);
+    return false;
+  }
+
+  // Wait briefly for the first-tap unlock when Android requires it.
+  if (audioUnlockPromise) {
+    try { await audioUnlockPromise; } catch (_) {}
   }
 
   return new Promise(resolve => {
     let settled = false;
-    const audio = new Audio();
+    const audio = sharedOnlineAudio;
 
     const cleanup = () => {
       audio.onplaying = null;
@@ -195,8 +242,7 @@ function playOnlineHebrew(text, session, urlIndex = 0) {
     const cancelPlayback = () => {
       try {
         audio.pause();
-        audio.removeAttribute("src");
-        audio.load();
+        audio.currentTime = 0;
       } catch (_) {}
       finish(false);
     };
@@ -208,16 +254,27 @@ function playOnlineHebrew(text, session, urlIndex = 0) {
     };
 
     try {
+      audio.pause();
+      audio.currentTime = 0;
       activeOnlineAudio = audio;
       activeSpeechCancel = cancelPlayback;
       audio.preload = "auto";
+      audio.volume = 1;
       audio.src = urls[urlIndex];
       audio.onplaying = () => { speechMode = "online-hebrew"; };
       audio.onended = () => finish(true);
       audio.onerror = tryNext;
       const promise = audio.play();
-      if (promise && typeof promise.catch === "function") promise.catch(tryNext);
+      if (promise && typeof promise.catch === "function") {
+        promise.catch(() => {
+          // If Android still blocks playback, keep the game usable and
+          // let the next tap unlock audio before retrying.
+          audioUnlocked = false;
+          tryNext();
+        });
+      }
     } catch (_) {
+      audioUnlocked = false;
       tryNext();
     }
   });
@@ -238,6 +295,12 @@ function primeSpeech() {
   if (hebrewVoice && "speechSynthesis" in window) {
     try { window.speechSynthesis.resume(); } catch (_) {}
   }
+}
+
+function handleFirstAudioGesture() {
+  if (!state.sound) return;
+  primeSpeech();
+  unlockAudioFromGesture();
 }
 
 // All narration goes through one queue. A new task never starts speaking
@@ -750,7 +813,8 @@ if ("speechSynthesis" in window) {
     window.speechSynthesis.addEventListener("voiceschanged", refreshHebrewVoice);
   }
 }
-document.addEventListener("pointerdown", primeSpeech, { capture: true });
+document.addEventListener("pointerdown", handleFirstAudioGesture, { capture: true });
+document.addEventListener("touchstart", handleFirstAudioGesture, { capture: true, passive: true });
 
 homeBtn.addEventListener("click", () => setRoute("home"));
 soundBtn.addEventListener("click", () => {
@@ -759,7 +823,9 @@ soundBtn.addEventListener("click", () => {
   soundBtn.textContent = state.sound ? "🔊" : "🔇";
   if (state.sound) {
     primeSpeech();
-    speakNow("שלום אלון, הקול עובד בעברית");
+    unlockAudioFromGesture().finally(() => {
+      speakNow("שלום אלון, הקול עובד בעברית");
+    });
   } else {
     resetSpeechQueue();
   }
