@@ -74,67 +74,52 @@ function randomItem(values) {
 }
 
 let hebrewVoice = null;
+let availableVoices = [];
 let activeOnlineAudio = null;
 let activeUtterance = null;
 let activeSpeechCancel = null;
-let speechMode = "unknown";
 let speechSession = 0;
 let speechQueue = Promise.resolve();
+let audioCtx = null;
 
-// Android / Samsung browsers block media until the first real user gesture.
-// We unlock one persistent audio element on the first tap and reuse it for
-// all online Hebrew narration afterwards.
+const isAndroid = /Android/i.test(navigator.userAgent || "");
 const sharedOnlineAudio = new Audio();
 sharedOnlineAudio.preload = "auto";
 sharedOnlineAudio.playsInline = true;
-const SILENT_AUDIO_SRC = "data:audio/wav;base64,UklGRiQFAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
-let audioUnlocked = false;
-let audioUnlockPromise = null;
-
-function unlockAudioFromGesture() {
-  if (audioUnlocked) return Promise.resolve(true);
-  if (audioUnlockPromise) return audioUnlockPromise;
-
-  refreshHebrewVoice();
-  if ("speechSynthesis" in window) {
-    try { window.speechSynthesis.resume(); } catch (_) {}
-  }
-
-  audioUnlockPromise = (async () => {
-    try {
-      sharedOnlineAudio.pause();
-      sharedOnlineAudio.src = SILENT_AUDIO_SRC;
-      sharedOnlineAudio.volume = 0.01;
-      sharedOnlineAudio.currentTime = 0;
-      const result = sharedOnlineAudio.play();
-      if (result && typeof result.then === "function") await result;
-      sharedOnlineAudio.pause();
-      sharedOnlineAudio.currentTime = 0;
-      sharedOnlineAudio.volume = 1;
-      audioUnlocked = true;
-      return true;
-    } catch (_) {
-      return false;
-    } finally {
-      audioUnlockPromise = null;
-    }
-  })();
-
-  return audioUnlockPromise;
-}
 
 function refreshHebrewVoice() {
   hebrewVoice = null;
+  availableVoices = [];
   if (!("speechSynthesis" in window)) return;
   try {
-    const voices = window.speechSynthesis.getVoices() || [];
-    hebrewVoice = voices.find(v => {
+    availableVoices = window.speechSynthesis.getVoices() || [];
+    hebrewVoice = availableVoices.find(v => {
       const lang = String(v.lang || "").toLowerCase().replace("_", "-");
       return lang === "he-il" || lang === "he" || lang.startsWith("he-") || lang.startsWith("iw-");
-    }) || voices.find(v => /hebrew|עברית/i.test(String(v.name || ""))) || null;
-    if (hebrewVoice) speechMode = "local-hebrew";
+    }) || availableVoices.find(v => /hebrew|עברית/i.test(String(v.name || ""))) || null;
   } catch (_) {
+    availableVoices = [];
     hebrewVoice = null;
+  }
+}
+
+function ensureAudioContext() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!audioCtx || audioCtx.state === "closed") audioCtx = new AudioCtx();
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+    return audioCtx;
+  } catch (_) {
+    return null;
+  }
+}
+
+function primeAudioFromGesture() {
+  ensureAudioContext();
+  refreshHebrewVoice();
+  if ("speechSynthesis" in window) {
+    try { window.speechSynthesis.resume(); } catch (_) {}
   }
 }
 
@@ -151,8 +136,7 @@ function stopActiveSpeech() {
   if (activeOnlineAudio) {
     try {
       activeOnlineAudio.pause();
-      activeOnlineAudio.removeAttribute("src");
-      activeOnlineAudio.load();
+      activeOnlineAudio.currentTime = 0;
     } catch (_) {}
     activeOnlineAudio = null;
   }
@@ -166,23 +150,30 @@ function resetSpeechQueue() {
 
 function onlineTtsUrls(text) {
   const encoded = encodeURIComponent(text);
-  return [
-    `https://translate.googleapis.com/translate_tts?ie=UTF-8&client=gtx&tl=he&q=${encoded}`,
-    `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=he&q=${encoded}`
-  ];
+  // Some Android browsers handle the classic translate.google.com endpoint
+  // better than translate.googleapis.com, so Android tries it first.
+  const classic = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=he&q=${encoded}`;
+  const api = `https://translate.googleapis.com/translate_tts?ie=UTF-8&client=gtx&tl=he&q=${encoded}`;
+  return isAndroid ? [classic, api] : [api, classic];
 }
 
-function playLocalHebrew(text, session) {
+function playNativeHebrew(text, session, useExplicitVoice) {
   return new Promise(resolve => {
-    if (session !== speechSession || !state.sound || !hebrewVoice || !("speechSynthesis" in window)) {
+    if (session !== speechSession || !state.sound || !("speechSynthesis" in window)) {
+      resolve(false);
+      return;
+    }
+    if (useExplicitVoice && !hebrewVoice) {
       resolve(false);
       return;
     }
 
     let settled = false;
+    let timeoutId = null;
     const finish = result => {
       if (settled) return;
       settled = true;
+      clearTimeout(timeoutId);
       if (activeSpeechCancel === cancelPlayback) activeSpeechCancel = null;
       activeUtterance = null;
       resolve(result);
@@ -195,16 +186,18 @@ function playLocalHebrew(text, session) {
     try {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = "he-IL";
-      utterance.voice = hebrewVoice;
-      utterance.rate = 0.82;
-      utterance.pitch = 1.04;
+      if (useExplicitVoice && hebrewVoice) utterance.voice = hebrewVoice;
+      utterance.rate = 0.84;
+      utterance.pitch = 1.03;
       utterance.volume = 1;
       utterance.onend = () => finish(true);
       utterance.onerror = () => finish(false);
       activeUtterance = utterance;
       activeSpeechCancel = cancelPlayback;
+      try { window.speechSynthesis.resume(); } catch (_) {}
       window.speechSynthesis.speak(utterance);
-      speechMode = "local-hebrew";
+      // Android occasionally omits onend. Never let the narration queue freeze.
+      timeoutId = setTimeout(() => finish(true), Math.max(3500, text.length * 140));
     } catch (_) {
       finish(false);
     }
@@ -213,20 +206,14 @@ function playLocalHebrew(text, session) {
 
 async function playOnlineHebrew(text, session, urlIndex = 0) {
   const urls = onlineTtsUrls(text);
-  if (session !== speechSession || !state.sound || urlIndex >= urls.length) {
-    return false;
-  }
-
-  // Wait briefly for the first-tap unlock when Android requires it.
-  if (audioUnlockPromise) {
-    try { await audioUnlockPromise; } catch (_) {}
-  }
+  if (session !== speechSession || !state.sound || urlIndex >= urls.length) return false;
 
   return new Promise(resolve => {
     let settled = false;
+    let timeoutId = null;
     const audio = sharedOnlineAudio;
-
     const cleanup = () => {
+      clearTimeout(timeoutId);
       audio.onplaying = null;
       audio.onended = null;
       audio.onerror = null;
@@ -240,10 +227,7 @@ async function playOnlineHebrew(text, session, urlIndex = 0) {
       resolve(result);
     };
     const cancelPlayback = () => {
-      try {
-        audio.pause();
-        audio.currentTime = 0;
-      } catch (_) {}
+      try { audio.pause(); audio.currentTime = 0; } catch (_) {}
       finish(false);
     };
     const tryNext = () => {
@@ -256,25 +240,16 @@ async function playOnlineHebrew(text, session, urlIndex = 0) {
     try {
       audio.pause();
       audio.currentTime = 0;
-      activeOnlineAudio = audio;
-      activeSpeechCancel = cancelPlayback;
-      audio.preload = "auto";
       audio.volume = 1;
       audio.src = urls[urlIndex];
-      audio.onplaying = () => { speechMode = "online-hebrew"; };
+      activeOnlineAudio = audio;
+      activeSpeechCancel = cancelPlayback;
       audio.onended = () => finish(true);
       audio.onerror = tryNext;
-      const promise = audio.play();
-      if (promise && typeof promise.catch === "function") {
-        promise.catch(() => {
-          // If Android still blocks playback, keep the game usable and
-          // let the next tap unlock audio before retrying.
-          audioUnlocked = false;
-          tryNext();
-        });
-      }
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.catch === "function") playPromise.catch(tryNext);
+      timeoutId = setTimeout(tryNext, 8000);
     } catch (_) {
-      audioUnlocked = false;
       tryNext();
     }
   });
@@ -282,29 +257,24 @@ async function playOnlineHebrew(text, session, urlIndex = 0) {
 
 async function playHebrewSpeech(text, session) {
   refreshHebrewVoice();
+
+  // Best option: an actual Hebrew system voice (Samsung/Google/Windows).
   if (hebrewVoice) {
-    const played = await playLocalHebrew(text, session);
+    const played = await playNativeHebrew(text, session, true);
     if (played || session !== speechSession || !state.sound) return played;
   }
+
+  // On Android the voice list is sometimes empty even though the TTS engine can
+  // speak the requested language. In that case let Android choose by lang=he-IL.
+  if (isAndroid && availableVoices.length === 0 && "speechSynthesis" in window) {
+    const played = await playNativeHebrew(text, session, false);
+    if (played || session !== speechSession || !state.sound) return played;
+  }
+
+  // Fallback used successfully by the desktop version. Failure never blocks play.
   return playOnlineHebrew(text, session);
 }
 
-function primeSpeech() {
-  if (!state.sound) return;
-  refreshHebrewVoice();
-  if (hebrewVoice && "speechSynthesis" in window) {
-    try { window.speechSynthesis.resume(); } catch (_) {}
-  }
-}
-
-function handleFirstAudioGesture() {
-  if (!state.sound) return;
-  primeSpeech();
-  unlockAudioFromGesture();
-}
-
-// All narration goes through one queue. A new task never starts speaking
-// over the feedback from the task that just ended.
 function speak(text) {
   if (!state.sound || !text) return Promise.resolve(false);
   const session = speechSession;
@@ -316,8 +286,6 @@ function speak(text) {
   return speechQueue;
 }
 
-// Used for manual repeat / immediate corrective feedback: clear stale queued
-// narration first, then play only the requested sentence.
 function speakNow(text) {
   resetSpeechQueue();
   return speak(text);
@@ -330,8 +298,8 @@ function sleep(ms) {
 function playTone(frequency = 540, duration = 0.16) {
   if (!state.sound) return;
   try {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    const ctx = new AudioCtx();
+    const ctx = ensureAudioContext();
+    if (!ctx) return;
     const oscillator = ctx.createOscillator();
     const gain = ctx.createGain();
     oscillator.frequency.value = frequency;
@@ -342,7 +310,6 @@ function playTone(frequency = 540, duration = 0.16) {
     gain.connect(ctx.destination);
     oscillator.start();
     oscillator.stop(ctx.currentTime + duration + 0.02);
-    oscillator.addEventListener("ended", () => ctx.close());
   } catch (_) {}
 }
 
@@ -812,9 +779,15 @@ if ("speechSynthesis" in window) {
   if (typeof window.speechSynthesis.addEventListener === "function") {
     window.speechSynthesis.addEventListener("voiceschanged", refreshHebrewVoice);
   }
+  // Voice lists often arrive late on Android/Chrome.
+  setTimeout(refreshHebrewVoice, 250);
+  setTimeout(refreshHebrewVoice, 1000);
+  setTimeout(refreshHebrewVoice, 2500);
 }
-document.addEventListener("pointerdown", handleFirstAudioGesture, { capture: true });
-document.addEventListener("touchstart", handleFirstAudioGesture, { capture: true, passive: true });
+
+// First real touch/click primes Android media. It never blocks the game.
+document.addEventListener("pointerdown", primeAudioFromGesture, { capture: true });
+document.addEventListener("touchstart", primeAudioFromGesture, { capture: true, passive: true });
 
 homeBtn.addEventListener("click", () => setRoute("home"));
 soundBtn.addEventListener("click", () => {
@@ -822,10 +795,8 @@ soundBtn.addEventListener("click", () => {
   safeSet("numberTrainSound", state.sound ? "on" : "off");
   soundBtn.textContent = state.sound ? "🔊" : "🔇";
   if (state.sound) {
-    primeSpeech();
-    unlockAudioFromGesture().finally(() => {
-      speakNow("שלום אלון, הקול עובד בעברית");
-    });
+    primeAudioFromGesture();
+    speakNow("שלום אלון, הקול עובד בעברית");
   } else {
     resetSpeechQueue();
   }
@@ -839,146 +810,6 @@ fullscreenBtn.addEventListener("click", async () => {
   }
 });
 
-// ---------- Android / tablet sound activation gate ----------
-let soundGateDismissed = false;
-
-function showSoundGate() {
-  // Force sound ON for this fresh tablet session. A previous test may have
-  // persisted the mute setting in localStorage.
-  state.sound = true;
-  safeSet("numberTrainSound", "on");
-  soundBtn.textContent = "🔊";
-
-  const old = document.getElementById("soundStartGate");
-  if (old) old.remove();
-
-  const gate = document.createElement("div");
-  gate.id = "soundStartGate";
-  gate.setAttribute("role", "dialog");
-  gate.setAttribute("aria-label", "הפעלת קול");
-  gate.style.cssText = [
-    "position:fixed",
-    "inset:0",
-    "z-index:99999",
-    "display:flex",
-    "align-items:center",
-    "justify-content:center",
-    "background:rgba(255,248,235,.96)",
-    "padding:24px",
-    "direction:rtl"
-  ].join(";");
-
-  const card = document.createElement("div");
-  card.style.cssText = [
-    "max-width:520px",
-    "width:min(92vw,520px)",
-    "background:white",
-    "border-radius:28px",
-    "padding:28px",
-    "text-align:center",
-    "box-shadow:0 18px 50px rgba(0,0,0,.14)"
-  ].join(";");
-
-  const icon = document.createElement("div");
-  icon.textContent = "🔊";
-  icon.style.cssText = "font-size:64px;line-height:1;margin-bottom:10px";
-
-  const title = document.createElement("div");
-  title.textContent = "מפעילים קול";
-  title.style.cssText = "font-size:32px;font-weight:800;margin-bottom:8px;color:#243447";
-
-  const text = document.createElement("div");
-  text.textContent = "לחצו פעם אחת כדי שהטאבלט יאפשר למשחק לדבר בעברית";
-  text.style.cssText = "font-size:20px;line-height:1.45;margin-bottom:22px;color:#52606d";
-
-  const button = document.createElement("button");
-  button.type = "button";
-  button.textContent = "הפעל קול ▶";
-  button.style.cssText = [
-    "min-width:220px",
-    "min-height:64px",
-    "border:0",
-    "border-radius:20px",
-    "font-size:25px",
-    "font-weight:800",
-    "cursor:pointer",
-    "background:#ffd56a",
-    "color:#243447"
-  ].join(";");
-
-  const status = document.createElement("div");
-  status.style.cssText = "min-height:28px;margin-top:12px;font-size:16px;color:#6b7280";
-
-  card.append(icon,title,text,button,status);
-  gate.appendChild(card);
-  document.body.appendChild(gate);
-
-  button.addEventListener("click", () => {
-    state.sound = true;
-    safeSet("numberTrainSound", "on");
-    soundBtn.textContent = "🔊";
-    button.disabled = true;
-    button.textContent = "מפעיל...";
-    status.textContent = "";
-
-    // IMPORTANT: call play() directly inside the click handler. This is the
-    // most reliable way to satisfy Android's user-gesture media policy.
-    refreshHebrewVoice();
-
-    const finishSuccess = () => {
-      if (soundGateDismissed) return;
-      soundGateDismissed = true;
-      audioUnlocked = true;
-      button.textContent = "הקול פועל ✓";
-      status.textContent = "";
-      setTimeout(() => gate.remove(), 550);
-    };
-
-    const tryOnline = () => {
-      try {
-        sharedOnlineAudio.pause();
-        sharedOnlineAudio.currentTime = 0;
-        sharedOnlineAudio.volume = 1;
-        sharedOnlineAudio.src = onlineTtsUrls("שלום אלון, מתחילים לשחק")[0];
-        sharedOnlineAudio.onplaying = finishSuccess;
-        sharedOnlineAudio.onerror = () => {
-          button.disabled = false;
-          button.textContent = "נסה שוב 🔊";
-          status.textContent = "הקול לא הופעל. לחצו שוב פעם אחת.";
-        };
-        const promise = sharedOnlineAudio.play();
-        if (promise && typeof promise.catch === "function") {
-          promise.catch(() => {
-            button.disabled = false;
-            button.textContent = "נסה שוב 🔊";
-            status.textContent = "הטאבלט חסם את הקול. לחצו שוב.";
-          });
-        }
-      } catch (_) {
-        button.disabled = false;
-        button.textContent = "נסה שוב 🔊";
-        status.textContent = "הקול לא הופעל. לחצו שוב.";
-      }
-    };
-
-    if (hebrewVoice && "speechSynthesis" in window) {
-      try {
-        const u = new SpeechSynthesisUtterance("שלום אלון, מתחילים לשחק");
-        u.lang = "he-IL";
-        u.voice = hebrewVoice;
-        u.rate = 0.82;
-        u.onstart = finishSuccess;
-        u.onerror = tryOnline;
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(u);
-      } catch (_) {
-        tryOnline();
-      }
-    } else {
-      tryOnline();
-    }
-  });
-}
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) clearRouteTimers();
 });
@@ -986,4 +817,3 @@ document.addEventListener("visibilitychange", () => {
 soundBtn.textContent = state.sound ? "🔊" : "🔇";
 safeSet("numberTrainRange", String(state.range));
 setRoute("home");
-showSoundGate();
