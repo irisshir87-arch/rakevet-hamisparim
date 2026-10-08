@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>רכבת המספרים של אלון</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <button id="homeBtn" class="icon-button hidden" aria-label="חזרה למסך הבית">🏠</button>
+      <div class="brand"><span aria-hidden="true">🚂</span><span>רכבת המספרים של אלון</span></div>
+      <div class="top-actions">
+        <button id="soundBtn" class="icon-button" aria-label="השתקת קול">🔊</button>
+        <button id="fullscreenBtn" class="icon-button" aria-label="מסך מלא">⛶</button>
+      </div>
+    </header>
+    <main id="screen" class="screen" tabindex="-1"></main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="confetti" class="confetti-layer" aria-hidden="true"></div>
+  </div>
+
+  <template id="home-template">
+    <section class="home-screen">
+      <div class="hero-card">
+        <div>
+          <p class="eyebrow">לומדים ספרות, כמויות וסדר</p>
+          <h1>עולים על רכבת המספרים!</h1>
+          <p class="subtitle">בוחרים משחק קצר ומתחילים ללמוד.</p>
+        </div>
+        <div class="hero-train" aria-hidden="true"><span>🚂</span><b>1</b><b>2</b><b>3</b><b>4</b><b>5</b></div>
+      </div>
+      <div class="game-grid">
+        <button class="game-card primary-game" data-route="train"><span class="game-icon">🚂</span><strong>רכבת המספרים</strong><small>מכניסים לכל קרון את הכמות המתאימה</small></button>
+        <button class="game-card action-game" data-route="catch"><span class="game-icon">🏎️</span><strong>מרוץ המספרים</strong><small>שומעים מספר, פוגעים במטרה ומקדמים את המכונית</small></button>
+        <button class="game-card" data-route="missing"><span class="game-icon">❓</span><strong>המספר החסר</strong><small>משלימים את רצף הקרונות</small></button>
+      </div>
+      <div class="parent-strip">
+        <span>שלב:</span>
+        <div class="segmented level-picker" aria-label="בחירת שלב"><button data-range="5">1–5</button><button data-range="6">1–6</button><button data-range="7">1–7</button><button data-range="8">1–8</button><button data-range="9">1–9</button><button data-range="10">1–10</button></div>
+        <span id="homeProgress" class="progress-note"></span>
+      </div>
+    </section>
+  </template>
+
+  <template id="catch-template">
+    <section class="race-screen">
+      <div class="screen-heading race-heading">
+        <div><p class="eyebrow">משחק אקשן</p><h1>מרוץ המספרים</h1></div>
+        <div class="race-mission" aria-live="polite" aria-label="המספר שצריך לפגוע בו">
+          <span class="race-mission-icon" aria-hidden="true">🎯</span>
+          <strong id="raceMissionNumber">?</strong>
+        </div>
+        <button id="repeatCatchBtn" class="sound-only-button" aria-label="השמעת המשימה שוב">🔊</button>
+      </div>
+      <div class="race-course" aria-label="מסלול מרוץ">
+        <div class="race-sky" aria-hidden="true">☁️ <span>☁️</span></div>
+        <div class="race-road">
+          <div class="finish-line" aria-hidden="true">🏁</div>
+          <div id="raceCountdown" class="race-countdown" aria-hidden="true"></div>
+          <div id="raceCar" class="race-car" aria-hidden="true">🏎️</div>
+          <div class="race-progress" aria-label="התקדמות במרוץ"><div id="raceProgressFill" class="race-progress-fill"></div></div>
+        </div>
+        <div class="target-zone">
+          <div id="catchArena" class="target-row" aria-label="מטרות עם מספרים"></div>
+          <div id="raceFeedback" class="race-feedback" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <template id="train-template">
+    <section class="train-screen">
+      <div class="train-topline">
+        <div class="instruction-card"><button id="repeatTrainBtn" class="sound-only-button compact-sound" type="button" aria-label="השמעת המשימה שוב">🔊</button><div><p class="eyebrow">המשימה</p><h1 id="trainInstruction"></h1></div></div>
+        <div class="round-counter"><span id="roundCurrent"></span>/<span id="roundTotal"></span></div>
+      </div>
+      <div class="train-track"><div class="engine" aria-hidden="true">🚂</div><div id="wagons" class="wagons"></div></div>
+      <div class="tray-card"><div class="tray-heading"><strong id="trayLabel"></strong><span>אפשר לגרור עם העכבר או ללחוץ</span></div><div id="objectTray" class="object-tray"></div></div>
+    </section>
+  </template>
+
+  <template id="missing-template">
+    <section class="missing-screen">
+      <div class="screen-heading"><div><p class="eyebrow">המספר החסר</p><h1>איזה קרון חסר ברכבת?</h1></div><div class="heading-actions"><button id="repeatMissingBtn" class="sound-only-button" type="button" aria-label="השמעת המשימה שוב">🔊</button><div class="round-counter"><span id="missingScore"></span> ⭐</div></div></div>
+      <div id="missingTrain" class="missing-train"></div>
+      <div id="answerChoices" class="answer-choices"></div>
+    </section>
+  </template>
+  <script src="app.js" defer></script>
+</body>
+</html>
