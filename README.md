@@ -11,3 +11,7 @@
 
 ## קרדיט לקובצי הקול
 Pronunciation recordings by Guy Lederfein (Dirk Gently), Wikimedia Commons, CC BY-SA / GFDL.
+
+
+## V15
+תיקון הפעלת אודיו של מספרים ב-Android: הפעלה ישירה מתוך מחוות המשתמש, לפני תור הקריינות.

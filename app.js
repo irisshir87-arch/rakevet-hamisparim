@@ -371,7 +371,13 @@ function speakNumber(number) {
 
 function speakNumberNow(number) {
   resetSpeechQueue();
-  return speakNumber(number);
+  if (!state.sound || !number) return Promise.resolve(false);
+  const session = speechSession;
+  // IMPORTANT: call audio.play() synchronously from the user's tap/click.
+  // Android blocks it if we first defer through a Promise queue.
+  const directPlayback = playRecordedNumber(number, session);
+  speechQueue = directPlayback.catch(() => false);
+  return directPlayback;
 }
 
 function sleep(ms) {
@@ -450,7 +456,7 @@ function renderHome() {
       screen.replaceChildren();
       renderHome();
       showToast(`עכשיו משחקים עם המספרים 1 עד ${state.range}`);
-      speakNumber(state.range);
+      speakNumberNow(state.range);
     });
   });
   const progress = screen.querySelector("#homeProgress");
@@ -532,7 +538,7 @@ async function runRaceCountdown() {
     void countdown.offsetWidth;
     countdown.classList.add("show", "pop");
     playTone(index < 3 ? 420 + index * 90 : 760, index < 3 ? 0.1 : 0.18);
-    if (steps[index].number) await speakNumber(steps[index].number);
+    if (steps[index].number) await (index === 0 ? speakNumberNow(steps[index].number) : speakNumber(steps[index].number));
     else await sleep(260);
     await sleep(80);
   }
@@ -609,7 +615,7 @@ async function checkCatchNumber(number, button) {
   setTimeout(() => car.classList.remove("boost"), 520);
 
   // Finish the success narration before creating the next mission.
-  await speakNumber(number);
+  await speakNumberNow(number);
   if (state.route !== "catch") return;
   await sleep(140);
 
@@ -694,7 +700,7 @@ function renderTrain() {
     });
     tray.appendChild(object);
   }
-  speakNumber(target);
+  speakNumberNow(target);
   const repeatTrainBtn = screen.querySelector("#repeatTrainBtn");
   if (repeatTrainBtn) repeatTrainBtn.addEventListener("click", () => speakNumberNow(target));
 }
@@ -769,7 +775,7 @@ function addItemToWagon(wagonNumber, source) {
   item.textContent = ITEM;
   cargo.appendChild(item);
   playTone(420 + state.trainCounts[target] * 35, 0.1);
-  speakNumber(state.trainCounts[target]);
+  speakNumberNow(state.trainCounts[target]);
   if (state.trainCounts[target] === target) completeTrainRound(wagon, target);
 }
 
@@ -844,7 +850,7 @@ async function checkMissingAnswer(number, button) {
     safeSet("numberTrainMissingScore", String(state.missingScore));
     celebrate();
     showToast(`נכון! המספר החסר הוא ${number}`, "success");
-    await speakNumber(number);
+    await speakNumberNow(number);
     if (state.route !== "missing") return;
     await sleep(160);
     renderMissing(true);
