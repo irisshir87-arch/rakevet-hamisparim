@@ -446,6 +446,16 @@ const obstacleState = {
 
 let snakeTimer = null;
 let snakeSwipeStart = null;
+const alienState = {
+  rows: 6,
+  cols: 6,
+  board: [],
+  selected: null,
+  busy: false,
+  score: 0,
+  target: 1
+};
+
 const snakeState = {
   cols: 10,
   rows: 7,
@@ -516,6 +526,7 @@ const ROUTE_RENDERERS = {
   fishing: startFishing,
   dino: startDino,
   snake: startSnake,
+  aliens: startAliens,
   rescue: startRescue,
   frogjump: startFrogJump,
   tower: startTower,
@@ -1301,6 +1312,390 @@ async function tryCatchFish() {
   setTimeout(() => {
     if (state.route === "fishing") renderFishing();
   }, 700);
+}
+
+// ---------- Alien Numbers: Match-3 ----------
+function startAliens() {
+  alienState.score = 0;
+  alienState.selected = null;
+  alienState.busy = false;
+  alienState.target = randomItem(numbersInRange());
+  alienState.board = createAlienBoard();
+  renderAliens();
+}
+
+function randomAlienColor() {
+  return randomItem([
+    "#80d6c5", "#ffb9cf", "#9cc5ff", "#ffd98a", "#c6a8ff",
+    "#a9df8f", "#ffb58f", "#87d9ee", "#f2a6d3", "#b7cf79"
+  ]);
+}
+
+function makeAlienCell(value = null) {
+  return {
+    value: value ?? randomItem(numbersInRange()),
+    color: randomAlienColor()
+  };
+}
+
+function createAlienBoard() {
+  const board = Array.from({ length: alienState.rows }, () => Array(alienState.cols).fill(null));
+
+  for (let r = 0; r < alienState.rows; r++) {
+    for (let c = 0; c < alienState.cols; c++) {
+      let candidates = [...numbersInRange()];
+      candidates = candidates.filter(n => {
+        if (c >= 2 && board[r][c - 1]?.value === n && board[r][c - 2]?.value === n) return false;
+        if (r >= 2 && board[r - 1][c]?.value === n && board[r - 2][c]?.value === n) return false;
+        return true;
+      });
+      board[r][c] = makeAlienCell(randomItem(candidates.length ? candidates : numbersInRange()));
+    }
+  }
+
+  alienState.board = board;
+  if (!hasAlienMove()) seedEasyAlienMove(board);
+  return board;
+}
+
+function seedEasyAlienMove(board) {
+  if (alienState.rows < 2 || alienState.cols < 4) return;
+  const target = alienState.target;
+  const row = alienState.rows - 2;
+  const otherChoices = numbersInRange().filter(n => n !== target);
+  const other = randomItem(otherChoices.length ? otherChoices : numbersInRange());
+
+  board[row][0] = makeAlienCell(target);
+  board[row][1] = makeAlienCell(target);
+  board[row][2] = makeAlienCell(other);
+  board[row + 1][2] = makeAlienCell(target);
+}
+
+function renderAliens() {
+  screen.innerHTML = `
+    <section class="mini-game alien-game">
+      ${missionBar("👽", "חייזרי המספרים", alienState.target, `${alienState.score}/5`)}
+      <div class="alien-help">לחצו על שני חייזרים סמוכים כדי ליצור 3 עם אותה ספרה</div>
+      <div class="alien-board-wrap">
+        <div id="alienBoard" class="alien-board" role="grid" aria-label="לוח חייזרי המספרים"></div>
+        <div id="alienFx" class="alien-fx" aria-hidden="true"></div>
+      </div>
+      <div class="alien-legend">
+        <span>3 = 💥</span><span>4 = 🔫 לייזר</span><span>5 = 🛸 חללית</span>
+      </div>
+    </section>`;
+
+  drawAlienBoard();
+  speakNumber(alienState.target);
+}
+
+function drawAlienBoard() {
+  const boardEl = screen.querySelector("#alienBoard");
+  if (!boardEl) return;
+  boardEl.replaceChildren();
+
+  for (let r = 0; r < alienState.rows; r++) {
+    for (let c = 0; c < alienState.cols; c++) {
+      const cell = alienState.board[r][c];
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "alien-cell";
+      button.dataset.row = String(r);
+      button.dataset.col = String(c);
+      button.style.setProperty("--alien-color", cell.color);
+      button.setAttribute("role", "gridcell");
+      button.setAttribute("aria-label", `חייזר מספר ${cell.value}`);
+      button.innerHTML = `<span class="alien-face">👽</span><strong>${cell.value}</strong>`;
+
+      if (alienState.selected && alienState.selected.r === r && alienState.selected.c === c) {
+        button.classList.add("selected");
+      }
+
+      button.addEventListener("click", () => selectAlienCell(r, c));
+      boardEl.appendChild(button);
+    }
+  }
+}
+
+function areAlienAdjacent(a, b) {
+  return Math.abs(a.r - b.r) + Math.abs(a.c - b.c) === 1;
+}
+
+async function selectAlienCell(r, c) {
+  if (alienState.busy) return;
+  const current = { r, c };
+
+  if (!alienState.selected) {
+    alienState.selected = current;
+    drawAlienBoard();
+    playTone(360, 0.06);
+    return;
+  }
+
+  if (alienState.selected.r === r && alienState.selected.c === c) {
+    alienState.selected = null;
+    drawAlienBoard();
+    return;
+  }
+
+  if (!areAlienAdjacent(alienState.selected, current)) {
+    alienState.selected = current;
+    drawAlienBoard();
+    playTone(360, 0.06);
+    return;
+  }
+
+  const first = alienState.selected;
+  alienState.selected = null;
+  alienState.busy = true;
+
+  swapAlienCells(first, current);
+  drawAlienBoard();
+  await sleep(170);
+
+  const groups = findAlienMatches();
+  if (!groups.length) {
+    swapAlienCells(first, current);
+    drawAlienBoard();
+    alienCellElement(first.r, first.c)?.classList.add("alien-no-match");
+    alienCellElement(current.r, current.c)?.classList.add("alien-no-match");
+    playTone(180, 0.12);
+    await sleep(320);
+    alienState.busy = false;
+    return;
+  }
+
+  await resolveAlienMatches(groups);
+  alienState.busy = false;
+}
+
+function swapAlienCells(a, b) {
+  const temp = alienState.board[a.r][a.c];
+  alienState.board[a.r][a.c] = alienState.board[b.r][b.c];
+  alienState.board[b.r][b.c] = temp;
+}
+
+function alienCellElement(r, c) {
+  return screen.querySelector(`.alien-cell[data-row="${r}"][data-col="${c}"]`);
+}
+
+function findAlienMatches() {
+  const groups = [];
+
+  for (let r = 0; r < alienState.rows; r++) {
+    let start = 0;
+    while (start < alienState.cols) {
+      const value = alienState.board[r][start]?.value;
+      let end = start + 1;
+      while (end < alienState.cols && alienState.board[r][end]?.value === value) end++;
+      if (value != null && end - start >= 3) {
+        groups.push({
+          value,
+          horizontal: true,
+          cells: Array.from({ length: end - start }, (_, i) => ({ r, c: start + i }))
+        });
+      }
+      start = end;
+    }
+  }
+
+  for (let c = 0; c < alienState.cols; c++) {
+    let start = 0;
+    while (start < alienState.rows) {
+      const value = alienState.board[start][c]?.value;
+      let end = start + 1;
+      while (end < alienState.rows && alienState.board[end][c]?.value === value) end++;
+      if (value != null && end - start >= 3) {
+        groups.push({
+          value,
+          horizontal: false,
+          cells: Array.from({ length: end - start }, (_, i) => ({ r: start + i, c }))
+        });
+      }
+      start = end;
+    }
+  }
+
+  return groups;
+}
+
+async function resolveAlienMatches(initialGroups) {
+  let groups = initialGroups;
+  let combo = 0;
+
+  while (groups.length && state.route === "aliens") {
+    combo++;
+    const toClear = new Set();
+    let targetHit = false;
+    let bonusType = "";
+
+    groups.forEach(group => {
+      if (group.value === alienState.target) targetHit = true;
+      group.cells.forEach(cell => toClear.add(`${cell.r}:${cell.c}`));
+
+      if (group.cells.length >= 5) {
+        bonusType = "ufo";
+        for (let r = 0; r < alienState.rows; r++) {
+          for (let c = 0; c < alienState.cols; c++) {
+            if (alienState.board[r][c]?.value === group.value) toClear.add(`${r}:${c}`);
+          }
+        }
+      } else if (group.cells.length === 4 && bonusType !== "ufo") {
+        bonusType = "laser";
+        if (group.horizontal) {
+          const row = group.cells[0].r;
+          for (let c = 0; c < alienState.cols; c++) toClear.add(`${row}:${c}`);
+        } else {
+          const col = group.cells[0].c;
+          for (let r = 0; r < alienState.rows; r++) toClear.add(`${r}:${col}`);
+        }
+      }
+    });
+
+    flashAlienMatches(toClear, bonusType, combo);
+    await sleep(bonusType ? 470 : 310);
+
+    if (targetHit) {
+      alienState.score++;
+      successChoice();
+      await speakNumberNow(alienState.target);
+
+      if (alienState.score >= 5) {
+        await finishAliens();
+        return;
+      }
+
+      const choices = numbersInRange().filter(n => n !== alienState.target);
+      alienState.target = randomItem(choices.length ? choices : numbersInRange());
+      const mission = screen.querySelector(".big-mission strong");
+      const score = screen.querySelector(".mini-score");
+      if (mission) mission.textContent = alienState.target;
+      if (score) score.textContent = `${alienState.score}/5`;
+    } else {
+      playTone(470, 0.08);
+    }
+
+    clearAlienCells(toClear);
+    collapseAlienBoard();
+    refillAlienBoard();
+    drawAlienBoard();
+    await sleep(230);
+    groups = findAlienMatches();
+  }
+
+  if (state.route === "aliens") {
+    ensureAlienBoardPlayable();
+    speakNumber(alienState.target);
+  }
+}
+
+function flashAlienMatches(toClear, bonusType, combo) {
+  toClear.forEach(key => {
+    const [r, c] = key.split(":").map(Number);
+    alienCellElement(r, c)?.classList.add("alien-pop");
+  });
+
+  const fx = screen.querySelector("#alienFx");
+  if (!fx) return;
+
+  if (bonusType === "laser") {
+    fx.textContent = "🔫⚡";
+    fx.className = "alien-fx show laser";
+  } else if (bonusType === "ufo") {
+    fx.textContent = "🛸✨";
+    fx.className = "alien-fx show ufo";
+  } else if (combo > 1) {
+    fx.textContent = "✨ COMBO!";
+    fx.className = "alien-fx show combo";
+  } else {
+    fx.textContent = "💥";
+    fx.className = "alien-fx show";
+  }
+
+  setTimeout(() => {
+    if (fx) fx.className = "alien-fx";
+  }, 550);
+}
+
+function clearAlienCells(toClear) {
+  toClear.forEach(key => {
+    const [r, c] = key.split(":").map(Number);
+    alienState.board[r][c] = null;
+  });
+}
+
+function collapseAlienBoard() {
+  for (let c = 0; c < alienState.cols; c++) {
+    const filled = [];
+    for (let r = alienState.rows - 1; r >= 0; r--) {
+      if (alienState.board[r][c]) filled.push(alienState.board[r][c]);
+    }
+    for (let r = alienState.rows - 1; r >= 0; r--) {
+      alienState.board[r][c] = filled[alienState.rows - 1 - r] || null;
+    }
+  }
+}
+
+function refillAlienBoard() {
+  for (let r = 0; r < alienState.rows; r++) {
+    for (let c = 0; c < alienState.cols; c++) {
+      if (!alienState.board[r][c]) alienState.board[r][c] = makeAlienCell();
+    }
+  }
+}
+
+function ensureAlienBoardPlayable() {
+  if (hasAlienMove()) return;
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const values = shuffle(alienState.board.flat().map(cell => cell.value));
+    let i = 0;
+    for (let r = 0; r < alienState.rows; r++) {
+      for (let c = 0; c < alienState.cols; c++) {
+        alienState.board[r][c] = makeAlienCell(values[i++]);
+      }
+    }
+    if (!findAlienMatches().length && hasAlienMove()) {
+      drawAlienBoard();
+      return;
+    }
+  }
+
+  seedEasyAlienMove(alienState.board);
+  drawAlienBoard();
+}
+
+function hasAlienMove() {
+  for (let r = 0; r < alienState.rows; r++) {
+    for (let c = 0; c < alienState.cols; c++) {
+      const here = { r, c };
+      const neighbors = [
+        { r, c: c + 1 },
+        { r: r + 1, c }
+      ].filter(p => p.r < alienState.rows && p.c < alienState.cols);
+
+      for (const next of neighbors) {
+        swapAlienCells(here, next);
+        const has = findAlienMatches().length > 0;
+        swapAlienCells(here, next);
+        if (has) return true;
+      }
+    }
+  }
+  return false;
+}
+
+async function finishAliens() {
+  alienState.busy = true;
+  celebrate();
+  const fx = screen.querySelector("#alienFx");
+  if (fx) {
+    fx.textContent = "🛸🏆👽";
+    fx.className = "alien-fx show ufo alien-win";
+  }
+  showToast("החייזרים ניצחו! 👽⭐", "success");
+  await sleep(1100);
+  if (state.route === "aliens") setRoute("home");
 }
 
 // ---------- Snake numbers: Nokia-style ----------
