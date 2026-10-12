@@ -205,14 +205,27 @@
 .food-item,.animal-item { border:none; background:transparent; font-size:66px; }
 .food-item.used,.animal-item.used { opacity:.15; transform:scale(.65); pointer-events:none; }
 
-/* fishing */
-.sea-scene { position:relative; min-height:430px; border-radius:32px; overflow:hidden; background:linear-gradient(#e2f7ff 0 18%,#63c7e8 18% 100%); }
-.water-line { position:absolute; top:55px; left:0; right:0; text-align:center; font-size:44px; opacity:.6; }
-.fish-zone { position:absolute; inset:90px 14px 14px; }
-.number-fish { position:absolute; border:none; background:transparent; display:flex; align-items:center; gap:6px; font-size:72px; animation:fishSwim 3s ease-in-out infinite alternate; }
-.number-fish strong { width:62px; height:62px; border-radius:50%; display:grid; place-items:center; background:#fff; border:4px solid #1b7695; font-size:34px; }
-.fish-1{left:5%;top:8%}.fish-2{left:32%;top:50%;animation-delay:.5s}.fish-3{right:28%;top:16%;animation-delay:1s}.fish-4{right:5%;top:58%;animation-delay:1.4s}
-.fish-caught { animation:fishCaught .5s forwards !important; }
+/* fishing with rod */
+.fishing-help,.dino-help { text-align:center; font-weight:850; font-size:1.05rem; }
+.fishing-sea { position:relative; min-height:480px; border-radius:32px; overflow:hidden; background:linear-gradient(#dff5ff 0 24%,#62c5e6 24% 100%); touch-action:none; }
+.fishing-sky { position:absolute; top:16px; left:20px; right:20px; display:flex; justify-content:space-between; font-size:40px; opacity:.85; }
+.water-line { position:absolute; top:92px; left:0; right:0; text-align:center; font-size:42px; opacity:.55; pointer-events:none; }
+.fish-zone { position:absolute; inset:125px 18px 20px; pointer-events:none; }
+.number-fish { position:absolute; display:flex; align-items:center; gap:6px; font-size:76px; animation:fishSwim 3s ease-in-out infinite alternate; transition:filter .15s,transform .2s,opacity .35s; }
+.number-fish strong { width:64px; height:64px; border-radius:50%; display:grid; place-items:center; background:#fff; border:4px solid #1b7695; font-size:35px; color:#123; }
+.fish-1{left:4%;top:7%}.fish-2{left:31%;top:52%;animation-delay:.5s}.fish-3{right:27%;top:14%;animation-delay:1s}.fish-4{right:4%;top:58%;animation-delay:1.4s}
+.number-fish.hook-near { filter:drop-shadow(0 0 12px #fff36d); transform:scale(1.12); }
+.number-fish.wrong-fish { animation:wrongFish .45s ease; }
+.number-fish.fish-on-hook { animation:fishCaughtByHook .65s forwards !important; filter:drop-shadow(0 0 10px #fff); }
+.rod-line-layer { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:5; }
+.rod-line-layer line { stroke:#3f3f3f; stroke-width:4; stroke-linecap:round; }
+.rod-handle { position:absolute; right:2%; top:-8px; font-size:145px; line-height:1; color:#835426; transform:rotate(20deg); z-index:6; pointer-events:none; }
+.fishing-hook { position:absolute; width:72px; height:72px; margin-left:-36px; margin-top:-36px; display:grid; place-items:center; border:none; border-radius:50%; background:rgba(255,255,255,.92); font-size:48px; z-index:8; box-shadow:0 8px 18px rgba(0,0,0,.18); touch-action:none; user-select:none; cursor:grab; transition:box-shadow .15s,background .15s; }
+.fishing-hook::after { content:""; position:absolute; inset:-16px; border:3px dashed rgba(255,255,255,.7); border-radius:50%; }
+.fishing-hook.hook-dragging { cursor:grabbing; background:#fff5bb; box-shadow:0 0 0 7px rgba(255,235,94,.28),0 9px 20px rgba(0,0,0,.2); }
+.fishing-hook.hook-returning { transition:left .32s ease,top .32s ease; }
+.fishing-hook.hook-catch { animation:hookCatch .55s ease; }
+.fishing-shore { position:absolute; left:10px; bottom:4px; font-size:40px; opacity:.85; pointer-events:none; }
 
 /* rescue */
 .rescue-scene { display:grid; gap:26px; }
@@ -270,4 +283,39 @@
   .balloon-number span { font-size:72px; }
   .number-gate { width:110px;height:120px; }
   .runaway-number { width:82px;height:82px;font-size:40px; }
+}
+
+
+/* ===== V17: Dino runner ===== */
+.dino-game { user-select:none; }
+.dino-course { position:relative; min-height:470px; width:100%; overflow:hidden; border:none; border-radius:32px; background:linear-gradient(#edf9ff 0 72%,#f6e3ad 72% 100%); cursor:pointer; touch-action:manipulation; text-align:initial; }
+.dino-clouds { position:absolute; inset:28px 42px auto; display:flex; justify-content:space-between; font-size:46px; opacity:.58; animation:dinoCloudDrift 7s ease-in-out infinite alternate; }
+.dino-ground { position:absolute; left:0; right:0; bottom:74px; height:8px; background:#6b5a42; box-shadow:0 10px 0 #ceb276; }
+.dino-character { position:absolute; left:12%; bottom:82px; font-size:92px; z-index:5; transform-origin:center bottom; filter:drop-shadow(0 8px 4px rgba(0,0,0,.13)); }
+.dino-character.dino-jump { animation:dinoJump .56s cubic-bezier(.25,.65,.35,1); }
+.dino-token-layer { position:absolute; inset:0; pointer-events:none; }
+.dino-number-token { position:absolute; bottom:93px; width:88px; height:100px; display:grid; place-items:center; z-index:4; }
+.dino-number-token span { font-size:86px; filter:drop-shadow(0 6px 3px rgba(0,0,0,.12)); }
+.dino-number-token strong { position:absolute; top:27px; left:0; right:0; text-align:center; font-size:38px; color:#473519; }
+.dino-number-token.dino-collected { animation:dinoCollect .5s forwards; }
+.dino-number-token.dino-wrong-token { animation:dinoWrong .36s ease; }
+.dino-jump-hint { position:absolute; left:15%; bottom:18px; font-size:48px; opacity:.45; animation:dinoHint .8s ease-in-out infinite alternate; }
+
+@keyframes wrongFish { 25%{transform:translateX(-12px)}75%{transform:translateX(12px)} }
+@keyframes fishCaughtByHook { 0%{transform:none}45%{transform:translateY(-55px) rotate(-10deg)}100%{transform:translateY(-260px) scale(.45);opacity:0} }
+@keyframes hookCatch { 50%{transform:translateY(-55px)} }
+@keyframes dinoCloudDrift { to{transform:translateX(-25px)} }
+@keyframes dinoJump { 0%,100%{transform:translateY(0) rotate(0)}45%{transform:translateY(-155px) rotate(-5deg)} }
+@keyframes dinoCollect { 30%{transform:scale(1.35);filter:drop-shadow(0 0 14px #ffd943)}100%{transform:translateY(-110px) scale(.3);opacity:0} }
+@keyframes dinoWrong { 25%{transform:translateX(-9px)}75%{transform:translateX(9px)} }
+@keyframes dinoHint { to{transform:translateY(-8px);opacity:.75} }
+
+@media (max-width: 700px) {
+  .fishing-sea,.dino-course { min-height:430px; }
+  .number-fish { font-size:62px; }
+  .number-fish strong { width:56px;height:56px;font-size:31px; }
+  .fishing-hook { width:66px;height:66px;margin-left:-33px;margin-top:-33px;font-size:44px; }
+  .dino-character { font-size:78px; }
+  .dino-number-token span { font-size:74px; }
+  .dino-number-token strong { font-size:34px; top:24px; }
 }

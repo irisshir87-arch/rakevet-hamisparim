@@ -425,6 +425,21 @@ function celebrate() {
 
 
 let arcadeTimer = null;
+let dinoRaf = null;
+let dinoLastFrame = 0;
+let dinoSpawnElapsed = 0;
+let dinoJumpTimer = null;
+let fishingDrag = null;
+
+const dinoState = {
+  score: 0,
+  target: 1,
+  running: false,
+  tokens: [],
+  jumpActive: false,
+  lastTokenWasTarget: false
+};
+
 const arcade = {
   round: 0,
   score: 0,
@@ -440,6 +455,13 @@ function clearRouteTimers() {
   catchMoveTimer = null;
   clearInterval(arcadeTimer);
   arcadeTimer = null;
+  if (dinoRaf) cancelAnimationFrame(dinoRaf);
+  dinoRaf = null;
+  dinoState.running = false;
+  dinoState.tokens = [];
+  clearTimeout(dinoJumpTimer);
+  dinoJumpTimer = null;
+  fishingDrag = null;
   resetSpeechQueue();
 }
 
@@ -454,6 +476,7 @@ const ROUTE_RENDERERS = {
   parking: startParking,
   monster: startMonster,
   fishing: startFishing,
+  dino: startDino,
   rescue: startRescue,
   frogjump: startFrogJump,
   tower: startTower,
@@ -827,7 +850,7 @@ async function feedMonster(button) {
   }
 }
 
-// ---------- Fishing ----------
+// ---------- Fishing with a real rod ----------
 function startFishing() {
   arcade.round = 0;
   renderFishing();
@@ -835,28 +858,357 @@ function startFishing() {
 
 function renderFishing() {
   pickTarget();
-  arcade.locked=false;
-  screen.innerHTML=`
+  arcade.locked = false;
+  fishingDrag = null;
+
+  screen.innerHTML = `
     <section class="mini-game fishing-game">
       ${missionBar("🎣", "דגים מספרים", arcade.target, `${arcade.round}/5`)}
-      <div class="sea-scene">
+      <div class="fishing-help"><span aria-hidden="true">☝️</span> גררו את הקרס עד הדג עם המספר הזה</div>
+      <div class="sea-scene fishing-sea" id="fishingSea">
+        <div class="fishing-sky" aria-hidden="true">☁️ <span>☀️</span></div>
         <div class="water-line">〰️〰️〰️</div>
+
+        <svg class="rod-line-layer" id="rodLineLayer" aria-hidden="true">
+          <line id="rodLine" x1="92%" y1="4%" x2="78%" y2="25%"></line>
+        </svg>
+        <div class="rod-handle" aria-hidden="true">╲</div>
+        <button type="button" class="fishing-hook" id="fishingHook" aria-label="קרס. גררו אותו אל הדג">🪝</button>
+
         <div class="fish-zone" id="fishZone"></div>
+        <div class="fishing-shore" aria-hidden="true">🪨 🌿</div>
       </div>
     </section>`;
-  choiceNumbers(arcade.target,4).forEach((n,i)=>{
-    const b=document.createElement("button");
-    b.type="button"; b.className=`number-fish fish-${i+1}`;
-    b.innerHTML=`<span>🐟</span><strong>${n}</strong>`;
-    b.addEventListener("click",async()=>{
-      if(arcade.locked)return;
-      if(n!==arcade.target)return wrongChoice(b);
-      arcade.locked=true; b.classList.add("fish-caught"); successChoice();
-      await speakNumberNow(n); nextArcadeRound("fishing",renderFishing,650);
-    });
-    screen.querySelector("#fishZone").appendChild(b);
+
+  const zone = screen.querySelector("#fishZone");
+  choiceNumbers(arcade.target, 4).forEach((n, i) => {
+    const fish = document.createElement("div");
+    fish.className = `number-fish fish-${i + 1}`;
+    fish.dataset.number = String(n);
+    fish.innerHTML = `<span>🐟</span><strong>${n}</strong>`;
+    zone.appendChild(fish);
   });
+
+  const hook = screen.querySelector("#fishingHook");
+  const sea = screen.querySelector("#fishingSea");
+  attachFishingRod(hook, sea);
+  resetFishingHook(false);
   speakNumber(arcade.target);
+}
+
+function fishingPointFromEvent(event, sea) {
+  const box = sea.getBoundingClientRect();
+  const x = Math.max(24, Math.min(box.width - 24, event.clientX - box.left));
+  const y = Math.max(32, Math.min(box.height - 28, event.clientY - box.top));
+  return { x, y, box };
+}
+
+function positionFishingHook(x, y) {
+  const sea = screen.querySelector("#fishingSea");
+  const hook = screen.querySelector("#fishingHook");
+  const line = screen.querySelector("#rodLine");
+  if (!sea || !hook || !line) return;
+
+  hook.style.left = `${x}px`;
+  hook.style.top = `${y}px`;
+
+  const width = sea.clientWidth || 1;
+  const height = sea.clientHeight || 1;
+  line.setAttribute("x2", `${(x / width) * 100}%`);
+  line.setAttribute("y2", `${(y / height) * 100}%`);
+}
+
+function resetFishingHook(animate = true) {
+  const sea = screen.querySelector("#fishingSea");
+  const hook = screen.querySelector("#fishingHook");
+  if (!sea || !hook) return;
+  hook.classList.toggle("hook-returning", animate);
+  const x = sea.clientWidth * 0.78;
+  const y = Math.max(72, sea.clientHeight * 0.22);
+  positionFishingHook(x, y);
+  if (animate) setTimeout(() => hook.classList.remove("hook-returning"), 360);
+}
+
+function attachFishingRod(hook, sea) {
+  hook.addEventListener("pointerdown", event => {
+    if (arcade.locked) return;
+    event.preventDefault();
+    hook.setPointerCapture(event.pointerId);
+    const point = fishingPointFromEvent(event, sea);
+    fishingDrag = { pointerId: event.pointerId };
+    hook.classList.add("hook-dragging");
+    positionFishingHook(point.x, point.y);
+  });
+
+  hook.addEventListener("pointermove", event => {
+    if (!fishingDrag || fishingDrag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const point = fishingPointFromEvent(event, sea);
+    positionFishingHook(point.x, point.y);
+    highlightFishUnderHook();
+  });
+
+  const finish = event => {
+    if (!fishingDrag || fishingDrag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    fishingDrag = null;
+    hook.classList.remove("hook-dragging");
+    tryCatchFish();
+  };
+
+  hook.addEventListener("pointerup", finish);
+  hook.addEventListener("pointercancel", () => {
+    fishingDrag = null;
+    hook.classList.remove("hook-dragging");
+    resetFishingHook();
+  });
+}
+
+function fishUnderHook() {
+  const hook = screen.querySelector("#fishingHook");
+  if (!hook) return null;
+  const h = hook.getBoundingClientRect();
+  const hx = h.left + h.width / 2;
+  const hy = h.top + h.height * 0.72;
+
+  let best = null;
+  let bestDistance = Infinity;
+  screen.querySelectorAll(".number-fish").forEach(fish => {
+    const f = fish.getBoundingClientRect();
+    const fx = f.left + f.width / 2;
+    const fy = f.top + f.height / 2;
+    const distance = Math.hypot(hx - fx, hy - fy);
+    const threshold = Math.max(56, Math.min(f.width, f.height) * 0.7);
+    if (distance < threshold && distance < bestDistance) {
+      best = fish;
+      bestDistance = distance;
+    }
+  });
+  return best;
+}
+
+function highlightFishUnderHook() {
+  const hit = fishUnderHook();
+  screen.querySelectorAll(".number-fish").forEach(fish => {
+    fish.classList.toggle("hook-near", fish === hit);
+  });
+}
+
+async function tryCatchFish() {
+  if (arcade.locked) return;
+  const fish = fishUnderHook();
+  screen.querySelectorAll(".number-fish").forEach(f => f.classList.remove("hook-near"));
+
+  if (!fish) {
+    playTone(260, 0.08);
+    resetFishingHook();
+    return;
+  }
+
+  const n = Number(fish.dataset.number);
+  if (n !== arcade.target) {
+    fish.classList.add("wrong-fish");
+    playTone(180, 0.16);
+    await speakNumberNow(arcade.target);
+    if (state.route === "fishing") resetFishingHook();
+    return;
+  }
+
+  arcade.locked = true;
+  const hook = screen.querySelector("#fishingHook");
+  fish.classList.add("fish-on-hook");
+  hook.classList.add("hook-catch");
+  successChoice();
+  await speakNumberNow(n);
+
+  if (state.route !== "fishing") return;
+  arcade.round++;
+  if (arcade.round >= 5) {
+    celebrate();
+    showToast("איזה יופי! תפסתם את כל הדגים ⭐", "success");
+    await sleep(650);
+    if (state.route === "fishing") setRoute("home");
+    return;
+  }
+  setTimeout(() => {
+    if (state.route === "fishing") renderFishing();
+  }, 700);
+}
+
+// ---------- Dino numbers: Google-Dino style runner ----------
+function startDino() {
+  dinoState.score = 0;
+  dinoState.tokens = [];
+  dinoState.running = true;
+  dinoState.jumpActive = false;
+  dinoState.lastTokenWasTarget = false;
+  arcade.previousTarget = 0;
+  pickDinoTarget();
+  renderDino();
+}
+
+function pickDinoTarget() {
+  const nums = numbersInRange();
+  const candidates = nums.filter(n => n !== dinoState.target);
+  dinoState.target = randomItem(candidates.length ? candidates : nums);
+}
+
+function renderDino() {
+  screen.innerHTML = `
+    <section class="mini-game dino-game">
+      ${missionBar("🦖", "דינו המספרים", dinoState.target, `${dinoState.score}/5`)}
+      <div class="dino-help"><span aria-hidden="true">☝️</span> הקישו כדי לקפוץ כשרואים את המספר הנכון</div>
+      <div class="dino-course" id="dinoCourse" role="button" tabindex="0" aria-label="מסלול הדינוזאור. הקישו כדי לקפוץ">
+        <div class="dino-clouds" aria-hidden="true">☁️ <span>☁️</span></div>
+        <div class="dino-ground" aria-hidden="true"></div>
+        <div class="dino-character" id="dinoCharacter" aria-hidden="true">🦖</div>
+        <div class="dino-token-layer" id="dinoTokenLayer"></div>
+        <div class="dino-jump-hint" aria-hidden="true">⬆</div>
+      </div>
+    </section>`;
+
+  screen.querySelector("#dinoCourse").addEventListener("pointerdown", event => {
+    event.preventDefault();
+    dinoJump();
+  });
+  screen.querySelector("#dinoCourse").addEventListener("keydown", event => {
+    if (event.code === "Space" || event.code === "ArrowUp") {
+      event.preventDefault();
+      dinoJump();
+    }
+  });
+
+  dinoLastFrame = performance.now();
+  dinoSpawnElapsed = 750;
+  speakNumber(dinoState.target);
+  dinoRaf = requestAnimationFrame(dinoLoop);
+}
+
+function dinoLoop(timestamp) {
+  if (!dinoState.running || state.route !== "dino") return;
+
+  const dt = Math.min(40, Math.max(0, timestamp - dinoLastFrame));
+  dinoLastFrame = timestamp;
+  dinoSpawnElapsed += dt;
+
+  if (dinoSpawnElapsed >= 1450) {
+    dinoSpawnElapsed = 0;
+    spawnDinoNumber();
+  }
+
+  const course = screen.querySelector("#dinoCourse");
+  if (!course) return;
+  const width = course.clientWidth || 800;
+  const speed = Math.max(0.16, width / 4300); // px per ms
+
+  dinoState.tokens = dinoState.tokens.filter(token => {
+    token.x -= speed * dt;
+    token.el.style.left = `${token.x}px`;
+    if (token.x < -90) {
+      token.el.remove();
+      return false;
+    }
+    return true;
+  });
+
+  dinoRaf = requestAnimationFrame(dinoLoop);
+}
+
+function spawnDinoNumber() {
+  const layer = screen.querySelector("#dinoTokenLayer");
+  const course = screen.querySelector("#dinoCourse");
+  if (!layer || !course) return;
+
+  const all = numbersInRange();
+  let number;
+  // Target appears often enough that a four-year-old never waits long.
+  if (!dinoState.lastTokenWasTarget && Math.random() < 0.48) {
+    number = dinoState.target;
+    dinoState.lastTokenWasTarget = true;
+  } else {
+    const others = all.filter(n => n !== dinoState.target);
+    number = randomItem(others.length ? others : all);
+    dinoState.lastTokenWasTarget = number === dinoState.target;
+  }
+
+  const token = document.createElement("div");
+  token.className = "dino-number-token";
+  token.dataset.number = String(number);
+  token.innerHTML = `<span>🥚</span><strong>${number}</strong>`;
+  const x = course.clientWidth + 70;
+  token.style.left = `${x}px`;
+  layer.appendChild(token);
+  dinoState.tokens.push({ el: token, number, x, processed: false });
+}
+
+function dinoJump() {
+  if (!dinoState.running || state.route !== "dino" || dinoState.jumpActive) return;
+
+  dinoState.jumpActive = true;
+  const dino = screen.querySelector("#dinoCharacter");
+  if (!dino) return;
+  dino.classList.remove("dino-jump");
+  void dino.offsetWidth;
+  dino.classList.add("dino-jump");
+
+  const course = screen.querySelector("#dinoCourse");
+  const hitCenter = Math.max(105, course.clientWidth * 0.19);
+  const hitRadius = Math.max(70, course.clientWidth * 0.075);
+
+  let nearest = null;
+  let distance = Infinity;
+  dinoState.tokens.forEach(token => {
+    if (token.processed) return;
+    const d = Math.abs(token.x - hitCenter);
+    if (d < hitRadius && d < distance) {
+      nearest = token;
+      distance = d;
+    }
+  });
+
+  if (nearest) {
+    nearest.processed = true;
+    if (nearest.number === dinoState.target) {
+      dinoCollectNumber(nearest);
+    } else {
+      nearest.el.classList.add("dino-wrong-token");
+      playTone(180, 0.12);
+      speakNumberNow(dinoState.target);
+    }
+  }
+
+  clearTimeout(dinoJumpTimer);
+  dinoJumpTimer = setTimeout(() => {
+    dinoState.jumpActive = false;
+    dino?.classList.remove("dino-jump");
+  }, 570);
+}
+
+async function dinoCollectNumber(token) {
+  token.el.classList.add("dino-collected");
+  dinoState.score++;
+  successChoice();
+  await speakNumberNow(token.number);
+
+  if (state.route !== "dino") return;
+  if (dinoState.score >= 5) {
+    dinoState.running = false;
+    if (dinoRaf) cancelAnimationFrame(dinoRaf);
+    dinoRaf = null;
+    celebrate();
+    showToast("דינו ניצח! 🏁", "success");
+    setTimeout(() => {
+      if (state.route === "dino") setRoute("home");
+    }, 900);
+    return;
+  }
+
+  pickDinoTarget();
+  const mission = screen.querySelector(".big-mission strong");
+  const score = screen.querySelector(".mini-score");
+  if (mission) mission.textContent = dinoState.target;
+  if (score) score.textContent = `${dinoState.score}/5`;
+  speakNumber(dinoState.target);
 }
 
 // ---------- Rescue animals ----------
