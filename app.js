@@ -431,6 +431,33 @@ let dinoSpawnElapsed = 0;
 let dinoJumpTimer = null;
 let fishingDrag = null;
 
+let obstacleRaf = null;
+let obstacleLastFrame = 0;
+let obstacleSpawnElapsed = 0;
+const obstacleState = {
+  running: false,
+  lane: 1,
+  score: 0,
+  target: 1,
+  objects: [],
+  targetDrought: 0,
+  invulnerableUntil: 0
+};
+
+let snakeTimer = null;
+let snakeSwipeStart = null;
+const snakeState = {
+  cols: 10,
+  rows: 7,
+  running: false,
+  score: 0,
+  target: 1,
+  direction: { x: 1, y: 0 },
+  nextDirection: { x: 1, y: 0 },
+  body: [],
+  foods: []
+};
+
 const dinoState = {
   score: 0,
   target: 1,
@@ -462,6 +489,17 @@ function clearRouteTimers() {
   clearTimeout(dinoJumpTimer);
   dinoJumpTimer = null;
   fishingDrag = null;
+
+  if (obstacleRaf) cancelAnimationFrame(obstacleRaf);
+  obstacleRaf = null;
+  obstacleState.running = false;
+  obstacleState.objects = [];
+
+  clearInterval(snakeTimer);
+  snakeTimer = null;
+  snakeState.running = false;
+  snakeSwipeStart = null;
+
   resetSpeechQueue();
 }
 
@@ -477,6 +515,7 @@ const ROUTE_RENDERERS = {
   monster: startMonster,
   fishing: startFishing,
   dino: startDino,
+  snake: startSnake,
   rescue: startRescue,
   frogjump: startFrogJump,
   tower: startTower,
@@ -691,48 +730,277 @@ function renderCannon() {
   speakNumber(arcade.target);
 }
 
-// ---------- Obstacle race ----------
+// ---------- Obstacle race: real 3-lane driving ----------
 function startObstacle() {
-  arcade.round = 0;
-  arcade.score = 0;
+  obstacleState.running = true;
+  obstacleState.lane = 1;
+  obstacleState.score = 0;
+  obstacleState.objects = [];
+  obstacleState.targetDrought = 0;
+  obstacleState.invulnerableUntil = 0;
+  obstacleLastFrame = performance.now();
+  obstacleSpawnElapsed = 700;
+  pickObstacleTarget();
   renderObstacle();
 }
 
+function pickObstacleTarget() {
+  const nums = numbersInRange();
+  const candidates = nums.filter(n => n !== obstacleState.target);
+  obstacleState.target = randomItem(candidates.length ? candidates : nums);
+}
+
 function renderObstacle() {
-  pickTarget();
-  arcade.locked = false;
-  const pct = (arcade.round / 5) * 100;
   screen.innerHTML = `
-    <section class="mini-game obstacle-game">
-      ${missionBar("🚧", "מרוץ מכשולים", arcade.target, `${arcade.round}/5`)}
-      <div class="obstacle-course">
-        <div class="obstacle-road">
-          <div class="obstacle-finish">🏁</div>
-          <div class="obstacle-car" id="obstacleCar" style="right:calc(${pct}% - 20px)">🏎️</div>
-        </div>
-        <div class="gate-title">איזה שער ייפתח?</div>
-        <div class="number-gates" id="numberGates"></div>
+    <section class="mini-game obstacle-runner-game">
+      ${missionBar("🚧", "מרוץ מכשולים", obstacleState.target, `${obstacleState.score}/5`)}
+      <div class="obstacle-help"><span aria-hidden="true">↔️</span> עברו נתיב כדי להתחמק ולאסוף את המספר הנכון</div>
+
+      <div class="runner-road" id="runnerRoad" aria-label="מסלול מרוץ עם שלושה נתיבים">
+        <div class="runner-scenery" aria-hidden="true"><span>🌳</span><span>🏁</span><span>🌳</span></div>
+        <div class="lane-divider lane-divider-a" aria-hidden="true"></div>
+        <div class="lane-divider lane-divider-b" aria-hidden="true"></div>
+
+        <button class="lane-tap lane-tap-0" type="button" data-lane="0" aria-label="מעבר לנתיב שמאל"></button>
+        <button class="lane-tap lane-tap-1" type="button" data-lane="1" aria-label="מעבר לנתיב אמצע"></button>
+        <button class="lane-tap lane-tap-2" type="button" data-lane="2" aria-label="מעבר לנתיב ימין"></button>
+
+        <div id="runnerObjectLayer" class="runner-object-layer"></div>
+        <div id="runnerCar" class="runner-car lane-1" aria-hidden="true">🏎️</div>
+        <div id="runnerCrash" class="runner-crash" aria-hidden="true"></div>
+      </div>
+
+      <div class="runner-controls" aria-label="שליטה במכונית">
+        <button id="runnerLeft" type="button" aria-label="שמאלה">⬅️</button>
+        <div class="runner-status"><span>אספת:</span><strong id="runnerScore">${obstacleState.score}/5</strong></div>
+        <button id="runnerRight" type="button" aria-label="ימינה">➡️</button>
       </div>
     </section>`;
-  choiceNumbers(arcade.target, 3).forEach(n => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "number-gate";
-    b.innerHTML = `<span class="gate-bars">▥</span><strong>${n}</strong>`;
-    b.addEventListener("click", async () => {
-      if (arcade.locked) return;
-      if (n !== arcade.target) return wrongChoice(b);
-      arcade.locked = true;
-      b.classList.add("gate-open");
-      const car = screen.querySelector("#obstacleCar");
-      car.classList.add("obstacle-boost");
-      successChoice();
-      await speakNumberNow(n);
-      nextArcadeRound("obstacle", renderObstacle, 680);
+
+  screen.querySelectorAll(".lane-tap").forEach(button => {
+    button.addEventListener("pointerdown", event => {
+      event.preventDefault();
+      moveObstacleCarToLane(Number(button.dataset.lane));
     });
-    screen.querySelector("#numberGates").appendChild(b);
   });
-  speakNumber(arcade.target);
+  screen.querySelector("#runnerLeft").addEventListener("pointerdown", event => {
+    event.preventDefault();
+    moveObstacleCar(-1);
+  });
+  screen.querySelector("#runnerRight").addEventListener("pointerdown", event => {
+    event.preventDefault();
+    moveObstacleCar(1);
+  });
+
+  const road = screen.querySelector("#runnerRoad");
+  let swipeStartX = null;
+  road.addEventListener("pointerdown", event => {
+    swipeStartX = event.clientX;
+  });
+  road.addEventListener("pointerup", event => {
+    if (swipeStartX === null) return;
+    const dx = event.clientX - swipeStartX;
+    swipeStartX = null;
+    if (Math.abs(dx) > 35) moveObstacleCar(dx > 0 ? -1 : 1);
+  });
+
+  road.addEventListener("keydown", event => {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      moveObstacleCar(-1);
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      moveObstacleCar(1);
+    }
+  });
+
+  speakNumber(obstacleState.target);
+  obstacleLastFrame = performance.now();
+  obstacleRaf = requestAnimationFrame(obstacleLoop);
+}
+
+function moveObstacleCar(delta) {
+  // RTL screen: visual left is lane 0, visual right is lane 2.
+  moveObstacleCarToLane(Math.max(0, Math.min(2, obstacleState.lane + delta)));
+}
+
+function moveObstacleCarToLane(lane) {
+  if (!obstacleState.running) return;
+  obstacleState.lane = Math.max(0, Math.min(2, lane));
+  const car = screen.querySelector("#runnerCar");
+  if (!car) return;
+  car.classList.remove("lane-0", "lane-1", "lane-2");
+  car.classList.add(`lane-${obstacleState.lane}`);
+}
+
+function obstacleLoop(timestamp) {
+  if (!obstacleState.running || state.route !== "obstacle") return;
+
+  const road = screen.querySelector("#runnerRoad");
+  if (!road) return;
+
+  const dt = Math.min(45, Math.max(0, timestamp - obstacleLastFrame));
+  obstacleLastFrame = timestamp;
+  obstacleSpawnElapsed += dt;
+
+  if (obstacleSpawnElapsed >= 900) {
+    obstacleSpawnElapsed = 0;
+    spawnObstacleObject();
+  }
+
+  const roadHeight = road.clientHeight || 520;
+  const collisionY = roadHeight - 150;
+  const speed = Math.max(0.18, roadHeight / 2700);
+
+  obstacleState.objects = obstacleState.objects.filter(obj => {
+    obj.y += speed * dt;
+    obj.el.style.top = `${obj.y}px`;
+
+    if (!obj.processed && obj.y >= collisionY && obj.y <= collisionY + 72 && obj.lane === obstacleState.lane) {
+      obj.processed = true;
+      handleObstacleCollision(obj);
+    }
+
+    if (obj.y > roadHeight + 90) {
+      obj.el.remove();
+      return false;
+    }
+    return true;
+  });
+
+  obstacleRaf = requestAnimationFrame(obstacleLoop);
+}
+
+function spawnObstacleObject() {
+  const layer = screen.querySelector("#runnerObjectLayer");
+  const road = screen.querySelector("#runnerRoad");
+  if (!layer || !road) return;
+
+  const lane = Math.floor(Math.random() * 3);
+  const shouldSpawnObstacle = Math.random() < 0.38;
+
+  let type = "number";
+  let number = null;
+
+  if (shouldSpawnObstacle) {
+    type = "obstacle";
+  } else {
+    const nums = numbersInRange();
+    const forceTarget = obstacleState.targetDrought >= 2 || Math.random() < 0.52;
+    if (forceTarget) {
+      number = obstacleState.target;
+      obstacleState.targetDrought = 0;
+    } else {
+      const others = nums.filter(n => n !== obstacleState.target);
+      number = randomItem(others.length ? others : nums);
+      obstacleState.targetDrought++;
+    }
+  }
+
+  const el = document.createElement("div");
+  el.className = `runner-object ${type} lane-${lane}`;
+  el.dataset.type = type;
+  el.dataset.lane = String(lane);
+
+  if (type === "obstacle") {
+    const symbols = ["🚧", "🪨", "🛢️"];
+    el.textContent = randomItem(symbols);
+    el.setAttribute("aria-label", "מכשול");
+  } else {
+    el.innerHTML = `<span>⭐</span><strong>${number}</strong>`;
+    el.dataset.number = String(number);
+    el.classList.toggle("wanted-number", number === obstacleState.target);
+  }
+
+  layer.appendChild(el);
+  obstacleState.objects.push({
+    el,
+    type,
+    number,
+    lane,
+    y: -100,
+    processed: false
+  });
+}
+
+function handleObstacleCollision(obj) {
+  if (!obstacleState.running) return;
+
+  if (obj.type === "obstacle") {
+    const now = performance.now();
+    if (now < obstacleState.invulnerableUntil) return;
+    obstacleState.invulnerableUntil = now + 700;
+    obj.el.classList.add("runner-hit-obstacle");
+    const car = screen.querySelector("#runnerCar");
+    const crash = screen.querySelector("#runnerCrash");
+    car?.classList.add("runner-car-hit");
+    if (crash) {
+      crash.textContent = "💥";
+      crash.classList.remove("show");
+      void crash.offsetWidth;
+      crash.classList.add("show");
+    }
+    playTone(155, 0.18);
+    setTimeout(() => car?.classList.remove("runner-car-hit"), 420);
+    setTimeout(() => obj.el.remove(), 250);
+    return;
+  }
+
+  if (obj.number !== obstacleState.target) {
+    obj.el.classList.add("runner-wrong-number");
+    playTone(220, 0.09);
+    setTimeout(() => obj.el.remove(), 300);
+    return;
+  }
+
+  obj.el.classList.add("runner-collected");
+  obstacleState.score++;
+  successChoice();
+
+  const car = screen.querySelector("#runnerCar");
+  car?.classList.remove("runner-car-boost");
+  void car?.offsetWidth;
+  car?.classList.add("runner-car-boost");
+
+  const score = screen.querySelector("#runnerScore");
+  const miniScore = screen.querySelector(".mini-score");
+  if (score) score.textContent = `${obstacleState.score}/5`;
+  if (miniScore) miniScore.textContent = `${obstacleState.score}/5`;
+
+  const captured = obj.number;
+  speakNumberNow(captured);
+
+  if (obstacleState.score >= 5) {
+    finishObstacleRace();
+    return;
+  }
+
+  pickObstacleTarget();
+  const mission = screen.querySelector(".big-mission strong");
+  if (mission) mission.textContent = obstacleState.target;
+  setTimeout(() => {
+    if (state.route === "obstacle") speakNumber(obstacleState.target);
+  }, 180);
+}
+
+async function finishObstacleRace() {
+  obstacleState.running = false;
+  if (obstacleRaf) cancelAnimationFrame(obstacleRaf);
+  obstacleRaf = null;
+
+  const road = screen.querySelector("#runnerRoad");
+  if (road) {
+    const finish = document.createElement("div");
+    finish.className = "runner-finish-overlay";
+    finish.innerHTML = `<span>🏁</span><strong>ניצחת!</strong>`;
+    road.appendChild(finish);
+  }
+
+  celebrate();
+  showToast("הגעתם לקו הסיום! 🏁", "success");
+  await sleep(1100);
+  if (state.route === "obstacle") setRoute("home");
 }
 
 // ---------- Parking ----------
@@ -1033,6 +1301,248 @@ async function tryCatchFish() {
   setTimeout(() => {
     if (state.route === "fishing") renderFishing();
   }, 700);
+}
+
+// ---------- Snake numbers: Nokia-style ----------
+function startSnake() {
+  snakeState.running = true;
+  snakeState.score = 0;
+  snakeState.direction = { x: 1, y: 0 };
+  snakeState.nextDirection = { x: 1, y: 0 };
+  snakeState.body = [
+    { x: 4, y: 3 },
+    { x: 3, y: 3 },
+    { x: 2, y: 3 }
+  ];
+  snakeState.foods = [];
+  pickSnakeTarget();
+  spawnSnakeFoods();
+  renderSnake();
+}
+
+function pickSnakeTarget() {
+  const nums = numbersInRange();
+  const candidates = nums.filter(n => n !== snakeState.target);
+  snakeState.target = randomItem(candidates.length ? candidates : nums);
+}
+
+function snakeCellKey(x, y) {
+  return `${x}:${y}`;
+}
+
+function snakeFreeCells() {
+  const occupied = new Set(snakeState.body.map(p => snakeCellKey(p.x, p.y)));
+  snakeState.foods.forEach(f => occupied.add(snakeCellKey(f.x, f.y)));
+  const cells = [];
+  for (let y = 0; y < snakeState.rows; y++) {
+    for (let x = 0; x < snakeState.cols; x++) {
+      if (!occupied.has(snakeCellKey(x, y))) cells.push({ x, y });
+    }
+  }
+  return cells;
+}
+
+function spawnSnakeFoods() {
+  snakeState.foods = [];
+  const values = choiceNumbers(snakeState.target, Math.min(4, state.range));
+  values.forEach(number => {
+    const cells = snakeFreeCells();
+    const pos = randomItem(cells);
+    if (!pos) return;
+    snakeState.foods.push({ ...pos, number });
+  });
+}
+
+function renderSnake() {
+  screen.innerHTML = `
+    <section class="mini-game snake-game">
+      ${missionBar("🐍", "סנייק המספרים", snakeState.target, `${snakeState.score}/5`)}
+      <div class="snake-help"><span aria-hidden="true">☝️</span> כוונו את הנחש אל המספר הנכון</div>
+
+      <div id="snakeBoard" class="snake-board" role="application" tabindex="0" aria-label="לוח סנייק">
+        <div class="snake-grid-lines" aria-hidden="true"></div>
+        <div id="snakePieces"></div>
+      </div>
+
+      <div class="snake-controls" aria-label="חיצי שליטה">
+        <button type="button" data-dir="up" aria-label="למעלה">⬆️</button>
+        <div>
+          <button type="button" data-dir="left" aria-label="שמאלה">⬅️</button>
+          <button type="button" data-dir="down" aria-label="למטה">⬇️</button>
+          <button type="button" data-dir="right" aria-label="ימינה">➡️</button>
+        </div>
+      </div>
+    </section>`;
+
+  screen.querySelectorAll("[data-dir]").forEach(button => {
+    button.addEventListener("pointerdown", event => {
+      event.preventDefault();
+      setSnakeDirection(button.dataset.dir);
+    });
+  });
+
+  const board = screen.querySelector("#snakeBoard");
+  board.addEventListener("keydown", event => {
+    const map = {
+      ArrowUp: "up",
+      ArrowDown: "down",
+      ArrowLeft: "left",
+      ArrowRight: "right"
+    };
+    if (map[event.key]) {
+      event.preventDefault();
+      setSnakeDirection(map[event.key]);
+    }
+  });
+
+  board.addEventListener("pointerdown", event => {
+    snakeSwipeStart = { x: event.clientX, y: event.clientY };
+  });
+  board.addEventListener("pointerup", event => {
+    if (!snakeSwipeStart) return;
+    const dx = event.clientX - snakeSwipeStart.x;
+    const dy = event.clientY - snakeSwipeStart.y;
+    snakeSwipeStart = null;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
+    if (Math.abs(dx) > Math.abs(dy)) setSnakeDirection(dx > 0 ? "right" : "left");
+    else setSnakeDirection(dy > 0 ? "down" : "up");
+  });
+
+  drawSnake();
+  speakNumber(snakeState.target);
+
+  clearInterval(snakeTimer);
+  snakeTimer = setInterval(snakeTick, 360);
+}
+
+function setSnakeDirection(dir) {
+  if (!snakeState.running) return;
+  const dirs = {
+    up: { x: 0, y: -1 },
+    down: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+    right: { x: 1, y: 0 }
+  };
+  const next = dirs[dir];
+  if (!next) return;
+
+  // Prevent instant 180-degree turn, like the classic Nokia Snake.
+  if (next.x === -snakeState.direction.x && next.y === -snakeState.direction.y) return;
+  snakeState.nextDirection = next;
+}
+
+function snakeTick() {
+  if (!snakeState.running || state.route !== "snake") return;
+
+  snakeState.direction = { ...snakeState.nextDirection };
+  const head = snakeState.body[0];
+  let x = head.x + snakeState.direction.x;
+  let y = head.y + snakeState.direction.y;
+
+  // Friendly mode for age 4: crossing the edge wraps to the other side.
+  if (x < 0) x = snakeState.cols - 1;
+  if (x >= snakeState.cols) x = 0;
+  if (y < 0) y = snakeState.rows - 1;
+  if (y >= snakeState.rows) y = 0;
+
+  const newHead = { x, y };
+  const foodIndex = snakeState.foods.findIndex(f => f.x === x && f.y === y);
+  let grow = false;
+
+  if (foodIndex >= 0) {
+    const food = snakeState.foods[foodIndex];
+    if (food.number === snakeState.target) {
+      grow = true;
+      snakeState.score++;
+      successChoice();
+      speakNumberNow(food.number);
+
+      if (snakeState.score >= 5) {
+        snakeState.body.unshift(newHead);
+        drawSnake();
+        finishSnake();
+        return;
+      }
+
+      pickSnakeTarget();
+      spawnSnakeFoods();
+      const mission = screen.querySelector(".big-mission strong");
+      const score = screen.querySelector(".mini-score");
+      if (mission) mission.textContent = snakeState.target;
+      if (score) score.textContent = `${snakeState.score}/5`;
+      setTimeout(() => {
+        if (state.route === "snake") speakNumber(snakeState.target);
+      }, 120);
+    } else {
+      playTone(190, 0.11);
+      snakeState.foods.splice(foodIndex, 1);
+      const cells = snakeFreeCells();
+      const pos = randomItem(cells);
+      if (pos) {
+        const distractors = numbersInRange().filter(n => n !== snakeState.target);
+        snakeState.foods.push({ ...pos, number: randomItem(distractors.length ? distractors : numbersInRange()) });
+      }
+    }
+  }
+
+  snakeState.body.unshift(newHead);
+  if (!grow) snakeState.body.pop();
+
+  // No Game Over on self collision: briefly shrink/wiggle and keep playing.
+  const duplicate = snakeState.body.slice(1).some(p => p.x === newHead.x && p.y === newHead.y);
+  if (duplicate) {
+    snakeState.body = snakeState.body.slice(0, Math.max(3, Math.ceil(snakeState.body.length / 2)));
+    playTone(155, 0.13);
+    const board = screen.querySelector("#snakeBoard");
+    board?.classList.remove("snake-bump");
+    void board?.offsetWidth;
+    board?.classList.add("snake-bump");
+  }
+
+  drawSnake();
+}
+
+function drawSnake() {
+  const pieces = screen.querySelector("#snakePieces");
+  if (!pieces) return;
+  pieces.replaceChildren();
+
+  snakeState.foods.forEach(food => {
+    const token = document.createElement("div");
+    token.className = `snake-food ${food.number === snakeState.target ? "snake-food-target" : ""}`;
+    token.style.setProperty("--x", food.x);
+    token.style.setProperty("--y", food.y);
+    token.innerHTML = `<span>🍎</span><strong>${food.number}</strong>`;
+    pieces.appendChild(token);
+  });
+
+  snakeState.body.forEach((part, index) => {
+    const segment = document.createElement("div");
+    segment.className = index === 0 ? "snake-segment snake-head" : "snake-segment";
+    segment.style.setProperty("--x", part.x);
+    segment.style.setProperty("--y", part.y);
+    segment.textContent = index === 0 ? "🐍" : "";
+    pieces.appendChild(segment);
+  });
+}
+
+async function finishSnake() {
+  snakeState.running = false;
+  clearInterval(snakeTimer);
+  snakeTimer = null;
+  celebrate();
+
+  const board = screen.querySelector("#snakeBoard");
+  if (board) {
+    const win = document.createElement("div");
+    win.className = "snake-win";
+    win.innerHTML = `<span>🏆</span><strong>איזה נחש ארוך!</strong>`;
+    board.appendChild(win);
+  }
+
+  showToast("סיימתם את סנייק המספרים! 🐍", "success");
+  await sleep(1100);
+  if (state.route === "snake") setRoute("home");
 }
 
 // ---------- Dino numbers: Google-Dino style runner ----------
