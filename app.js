@@ -423,21 +423,50 @@ function celebrate() {
   }
 }
 
+
+let arcadeTimer = null;
+const arcade = {
+  round: 0,
+  score: 0,
+  target: 1,
+  locked: false,
+  count: 0,
+  step: 1,
+  previousTarget: 0
+};
+
 function clearRouteTimers() {
   clearInterval(catchMoveTimer);
   catchMoveTimer = null;
+  clearInterval(arcadeTimer);
+  arcadeTimer = null;
   resetSpeechQueue();
 }
+
+const ROUTE_RENDERERS = {
+  home: renderHome,
+  catch: startCatch,
+  train: startTrain,
+  bridge: startBridge,
+  frog: startFrog,
+  cannon: startCannon,
+  obstacle: startObstacle,
+  parking: startParking,
+  monster: startMonster,
+  fishing: startFishing,
+  rescue: startRescue,
+  frogjump: startFrogJump,
+  tower: startTower,
+  runaway: startRunaway
+};
 
 function setRoute(route) {
   clearRouteTimers();
   state.route = route;
   homeBtn.classList.toggle("hidden", route === "home");
   screen.replaceChildren();
-  if (route === "home") renderHome();
-  if (route === "catch") startCatch();
-  if (route === "train") startTrain();
-  if (route === "missing") renderMissing(true);
+  const renderer = ROUTE_RENDERERS[route] || renderHome;
+  renderer();
   screen.scrollTop = 0;
   screen.focus({ preventScroll: true });
 }
@@ -460,7 +489,541 @@ function renderHome() {
     });
   });
   const progress = screen.querySelector("#homeProgress");
-  progress.textContent = `מתחילים ב־1–5 • מוסיפים מספר אחד בכל שלב`;
+  progress.textContent = "מתחילים ב־1–5 • מוסיפים מספר אחד בכל שלב";
+}
+
+function pickTarget(previous = arcade.previousTarget) {
+  const nums = numbersInRange();
+  const candidates = nums.filter(n => n !== previous);
+  const value = randomItem(candidates.length ? candidates : nums);
+  arcade.previousTarget = value;
+  arcade.target = value;
+  return value;
+}
+
+function choiceNumbers(target, count = 4) {
+  const others = shuffle(numbersInRange().filter(n => n !== target));
+  return shuffle([target, ...others.slice(0, Math.min(count - 1, others.length))]);
+}
+
+function missionBar(icon, title, target, scoreText = "") {
+  return `
+    <div class="arcade-heading">
+      <div class="arcade-title"><span aria-hidden="true">${icon}</span><div><p class="eyebrow">לומדים מספרים במשחק</p><h1>${title}</h1></div></div>
+      <div class="big-mission" aria-live="polite"><span class="mission-mini">🎯</span><strong>${target}</strong></div>
+      ${scoreText ? `<div class="mini-score">${scoreText}</div>` : ""}
+    </div>`;
+}
+
+function wrongChoice(button) {
+  button.classList.remove("arcade-wrong");
+  void button.offsetWidth;
+  button.classList.add("arcade-wrong");
+  playTone(185, 0.14);
+  speakNumberNow(arcade.target);
+}
+
+function successChoice() {
+  playTone(720, 0.12);
+  celebrate();
+}
+
+async function nextArcadeRound(route, renderer, delay = 480) {
+  arcade.round++;
+  if (arcade.round >= 5) {
+    celebrate();
+    showToast("איזה יופי! סיימתם ⭐", "success");
+    await speak("כל הכבוד!");
+    if (state.route === route) setTimeout(() => setRoute("home"), 450);
+    return;
+  }
+  setTimeout(() => {
+    if (state.route === route) renderer();
+  }, delay);
+}
+
+// ---------- Broken bridge / missing number ----------
+function startBridge() {
+  arcade.round = 0;
+  arcade.score = 0;
+  renderBridge();
+}
+
+function renderBridge() {
+  const nums = numbersInRange();
+  const interior = nums.filter(n => n > 1 && n < state.range);
+  arcade.target = randomItem(interior.length ? interior : nums);
+  screen.innerHTML = `
+    <section class="mini-game bridge-game">
+      ${missionBar("🌉", "הגשר השבור", "?", `${arcade.round}/5`)}
+      <div class="bridge-scene">
+        <div class="bridge-water" aria-hidden="true">≈ ≋ ≈ ≋ ≈</div>
+        <div class="bridge-row" id="bridgeRow"></div>
+      </div>
+      <div class="choice-label">איזו אבן משלימה את הגשר?</div>
+      <div class="rock-choices" id="bridgeChoices"></div>
+    </section>`;
+  const row = screen.querySelector("#bridgeRow");
+  nums.forEach(n => {
+    const tile = document.createElement("div");
+    tile.className = n === arcade.target ? "bridge-gap" : "bridge-plank";
+    tile.dataset.number = n;
+    tile.textContent = n === arcade.target ? "" : n;
+    row.appendChild(tile);
+  });
+  choiceNumbers(arcade.target, 3).forEach(n => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "rock-choice";
+    b.textContent = n;
+    b.addEventListener("click", async () => {
+      if (arcade.locked) return;
+      if (n !== arcade.target) return wrongChoice(b);
+      arcade.locked = true;
+      const gap = screen.querySelector(".bridge-gap");
+      gap.className = "bridge-plank bridge-filled";
+      gap.textContent = n;
+      successChoice();
+      await speakNumberNow(n);
+      arcade.locked = false;
+      nextArcadeRound("bridge", renderBridge, 650);
+    });
+    screen.querySelector("#bridgeChoices").appendChild(b);
+  });
+}
+
+// ---------- Hungry frog ----------
+function startFrog() {
+  arcade.round = 0;
+  arcade.score = 0;
+  renderFrog();
+}
+
+function renderFrog() {
+  pickTarget();
+  arcade.locked = false;
+  screen.innerHTML = `
+    <section class="mini-game frog-game">
+      ${missionBar("🐸", "הצפרדע הרעבה", arcade.target, `${arcade.round}/5`)}
+      <div class="frog-pond">
+        <div class="fly-zone" id="flyZone"></div>
+        <div class="frog-wrap"><div id="frogTongue" class="frog-tongue"></div><div class="big-frog">🐸</div></div>
+      </div>
+    </section>`;
+  choiceNumbers(arcade.target, 4).forEach((n, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `number-fly fly-${i+1}`;
+    b.innerHTML = `<span>🪰</span><strong>${n}</strong>`;
+    b.addEventListener("click", async () => {
+      if (arcade.locked) return;
+      if (n !== arcade.target) return wrongChoice(b);
+      arcade.locked = true;
+      b.classList.add("frog-eaten");
+      const tongue = screen.querySelector("#frogTongue");
+      tongue.classList.add("shoot-tongue");
+      successChoice();
+      await speakNumberNow(n);
+      nextArcadeRound("frog", renderFrog, 650);
+    });
+    screen.querySelector("#flyZone").appendChild(b);
+  });
+  speakNumber(arcade.target);
+}
+
+// ---------- Cannon ----------
+function startCannon() {
+  arcade.round = 0;
+  renderCannon();
+}
+
+function renderCannon() {
+  pickTarget();
+  arcade.locked = false;
+  screen.innerHTML = `
+    <section class="mini-game cannon-game">
+      ${missionBar("🎯", "תותח המספרים", arcade.target, `${arcade.round}/5`)}
+      <div class="cannon-field">
+        <div class="balloon-targets" id="balloonTargets"></div>
+        <div class="cannon-wrap" aria-hidden="true"><div id="cannonBarrel" class="cannon-barrel"></div><div class="cannon-wheel"></div></div>
+      </div>
+    </section>`;
+  choiceNumbers(arcade.target, 4).forEach((n, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `balloon-number balloon-${i+1}`;
+    b.innerHTML = `<span>🎈</span><strong>${n}</strong>`;
+    b.addEventListener("click", async () => {
+      if (arcade.locked) return;
+      if (n !== arcade.target) return wrongChoice(b);
+      arcade.locked = true;
+      b.classList.add("balloon-pop");
+      screen.querySelector("#cannonBarrel").classList.add("cannon-fire");
+      successChoice();
+      await speakNumberNow(n);
+      nextArcadeRound("cannon", renderCannon, 620);
+    });
+    screen.querySelector("#balloonTargets").appendChild(b);
+  });
+  speakNumber(arcade.target);
+}
+
+// ---------- Obstacle race ----------
+function startObstacle() {
+  arcade.round = 0;
+  arcade.score = 0;
+  renderObstacle();
+}
+
+function renderObstacle() {
+  pickTarget();
+  arcade.locked = false;
+  const pct = (arcade.round / 5) * 100;
+  screen.innerHTML = `
+    <section class="mini-game obstacle-game">
+      ${missionBar("🚧", "מרוץ מכשולים", arcade.target, `${arcade.round}/5`)}
+      <div class="obstacle-course">
+        <div class="obstacle-road">
+          <div class="obstacle-finish">🏁</div>
+          <div class="obstacle-car" id="obstacleCar" style="right:calc(${pct}% - 20px)">🏎️</div>
+        </div>
+        <div class="gate-title">איזה שער ייפתח?</div>
+        <div class="number-gates" id="numberGates"></div>
+      </div>
+    </section>`;
+  choiceNumbers(arcade.target, 3).forEach(n => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "number-gate";
+    b.innerHTML = `<span class="gate-bars">▥</span><strong>${n}</strong>`;
+    b.addEventListener("click", async () => {
+      if (arcade.locked) return;
+      if (n !== arcade.target) return wrongChoice(b);
+      arcade.locked = true;
+      b.classList.add("gate-open");
+      const car = screen.querySelector("#obstacleCar");
+      car.classList.add("obstacle-boost");
+      successChoice();
+      await speakNumberNow(n);
+      nextArcadeRound("obstacle", renderObstacle, 680);
+    });
+    screen.querySelector("#numberGates").appendChild(b);
+  });
+  speakNumber(arcade.target);
+}
+
+// ---------- Parking ----------
+function startParking() {
+  arcade.round = 0;
+  renderParking();
+}
+
+function renderParking() {
+  pickTarget();
+  arcade.locked = false;
+  screen.innerHTML = `
+    <section class="mini-game parking-game">
+      ${missionBar("🅿️", "החניון", arcade.target, `${arcade.round}/5`)}
+      <div class="parking-lot">
+        <div class="parking-grid" id="parkingGrid"></div>
+        <div class="parking-car-area"><button id="parkingCar" class="parking-car" type="button" aria-label="מכונית">🚗</button><span>גררו את המכונית או לחצו על החניה</span></div>
+      </div>
+    </section>`;
+  const values = choiceNumbers(arcade.target, 4);
+  values.forEach(n => {
+    const spot = document.createElement("button");
+    spot.type = "button";
+    spot.className = "parking-spot";
+    spot.dataset.number = n;
+    spot.innerHTML = `<span>🅿️</span><strong>${n}</strong>`;
+    spot.addEventListener("click", () => parkCar(n, spot));
+    screen.querySelector("#parkingGrid").appendChild(spot);
+  });
+  enableParkingDrag(screen.querySelector("#parkingCar"));
+  speakNumber(arcade.target);
+}
+
+function enableParkingDrag(car) {
+  let session = null;
+  car.addEventListener("pointerdown", e => {
+    if (arcade.locked) return;
+    car.setPointerCapture(e.pointerId);
+    const ghost = document.createElement("div");
+    ghost.className = "parking-car-ghost";
+    ghost.textContent = "🚗";
+    document.body.appendChild(ghost);
+    session = {id:e.pointerId, ghost, moved:false, x:e.clientX, y:e.clientY};
+    ghost.style.left = `${e.clientX}px`; ghost.style.top = `${e.clientY}px`;
+  });
+  car.addEventListener("pointermove", e => {
+    if (!session || session.id !== e.pointerId) return;
+    if (Math.hypot(e.clientX-session.x, e.clientY-session.y)>8) session.moved=true;
+    session.ghost.style.left=`${e.clientX}px`; session.ghost.style.top=`${e.clientY}px`;
+  });
+  const end = e => {
+    if (!session || session.id !== e.pointerId) return;
+    const moved = session.moved;
+    session.ghost.remove();
+    session = null;
+    if (!moved) return;
+    const hit = document.elementFromPoint(e.clientX,e.clientY)?.closest?.(".parking-spot");
+    if (hit) parkCar(Number(hit.dataset.number), hit);
+  };
+  car.addEventListener("pointerup", end);
+  car.addEventListener("pointercancel", end);
+}
+
+async function parkCar(n, spot) {
+  if (arcade.locked) return;
+  if (n !== arcade.target) return wrongChoice(spot);
+  arcade.locked = true;
+  spot.classList.add("parked");
+  spot.innerHTML = `<span class="parked-car">🚗</span><strong>${n}</strong>`;
+  successChoice();
+  await speakNumberNow(n);
+  nextArcadeRound("parking", renderParking, 650);
+}
+
+// ---------- Monster quantity ----------
+function startMonster() {
+  arcade.round = 0;
+  renderMonster();
+}
+
+function renderMonster() {
+  pickTarget();
+  arcade.count = 0;
+  arcade.locked = false;
+  screen.innerHTML = `
+    <section class="mini-game monster-game">
+      ${missionBar("👾", "המפלצת הרעבה", arcade.target, `${arcade.round}/5`)}
+      <div class="monster-scene">
+        <div class="monster-character">👾<div id="monsterCount" class="belly-count">0 / ${arcade.target}</div></div>
+        <div class="cookie-tray" id="cookieTray"></div>
+      </div>
+    </section>`;
+  const total = Math.min(10, arcade.target + 3);
+  for (let i=0;i<total;i++) {
+    const b=document.createElement("button");
+    b.type="button"; b.className="food-item"; b.textContent="🍪";
+    b.addEventListener("click",()=>feedMonster(b));
+    screen.querySelector("#cookieTray").appendChild(b);
+  }
+  speakNumber(arcade.target);
+}
+
+async function feedMonster(button) {
+  if (arcade.locked || button.classList.contains("used")) return;
+  button.classList.add("used");
+  arcade.count++;
+  screen.querySelector("#monsterCount").textContent = `${arcade.count} / ${arcade.target}`;
+  playTone(390+arcade.count*30,.08);
+  speakNumberNow(arcade.count);
+  if (arcade.count >= arcade.target) {
+    arcade.locked=true;
+    screen.querySelector(".monster-character").classList.add("monster-happy");
+    successChoice();
+    nextArcadeRound("monster", renderMonster, 750);
+  }
+}
+
+// ---------- Fishing ----------
+function startFishing() {
+  arcade.round = 0;
+  renderFishing();
+}
+
+function renderFishing() {
+  pickTarget();
+  arcade.locked=false;
+  screen.innerHTML=`
+    <section class="mini-game fishing-game">
+      ${missionBar("🎣", "דגים מספרים", arcade.target, `${arcade.round}/5`)}
+      <div class="sea-scene">
+        <div class="water-line">〰️〰️〰️</div>
+        <div class="fish-zone" id="fishZone"></div>
+      </div>
+    </section>`;
+  choiceNumbers(arcade.target,4).forEach((n,i)=>{
+    const b=document.createElement("button");
+    b.type="button"; b.className=`number-fish fish-${i+1}`;
+    b.innerHTML=`<span>🐟</span><strong>${n}</strong>`;
+    b.addEventListener("click",async()=>{
+      if(arcade.locked)return;
+      if(n!==arcade.target)return wrongChoice(b);
+      arcade.locked=true; b.classList.add("fish-caught"); successChoice();
+      await speakNumberNow(n); nextArcadeRound("fishing",renderFishing,650);
+    });
+    screen.querySelector("#fishZone").appendChild(b);
+  });
+  speakNumber(arcade.target);
+}
+
+// ---------- Rescue animals ----------
+function startRescue() {
+  arcade.round=0;
+  renderRescue();
+}
+
+function renderRescue() {
+  pickTarget();
+  arcade.count=0; arcade.locked=false;
+  screen.innerHTML=`
+    <section class="mini-game rescue-game">
+      ${missionBar("🐾", "רכבת ההצלה", arcade.target, `${arcade.round}/5`)}
+      <div class="rescue-scene">
+        <div class="rescue-train"><span>🚂</span><div class="rescue-wagon"><strong>${arcade.target}</strong><div id="rescuedAnimals" class="rescued-animals"></div></div></div>
+        <div id="animalTray" class="animal-tray"></div>
+      </div>
+    </section>`;
+  const animals=["🐶","🐱","🐰","🐼","🦊","🐨","🐵","🐯","🐷","🐮"];
+  animals.slice(0,Math.min(10,arcade.target+3)).forEach(a=>{
+    const b=document.createElement("button"); b.type="button"; b.className="animal-item"; b.textContent=a;
+    b.addEventListener("click",()=>rescueAnimal(b,a));
+    screen.querySelector("#animalTray").appendChild(b);
+  });
+  speakNumber(arcade.target);
+}
+
+async function rescueAnimal(button, animal) {
+  if(arcade.locked||button.classList.contains("used"))return;
+  button.classList.add("used");
+  arcade.count++;
+  const span=document.createElement("span"); span.textContent=animal;
+  screen.querySelector("#rescuedAnimals").appendChild(span);
+  playTone(420+arcade.count*25,.08);
+  speakNumberNow(arcade.count);
+  if(arcade.count>=arcade.target){
+    arcade.locked=true; successChoice();
+    nextArcadeRound("rescue",renderRescue,760);
+  }
+}
+
+// ---------- Frog jumps / number order ----------
+function startFrogJump() {
+  arcade.round=0;
+  arcade.step=1;
+  renderFrogJump();
+}
+
+function renderFrogJump() {
+  arcade.locked=false;
+  screen.innerHTML=`
+    <section class="mini-game frogjump-game">
+      ${missionBar("🪷", "קפיצות הצפרדע", arcade.step, `${arcade.step-1}/${state.range}`)}
+      <div class="lily-pond">
+        <div id="lilyGrid" class="lily-grid"></div>
+      </div>
+    </section>`;
+  const visualOrder = shuffle(numbersInRange());
+  visualOrder.forEach(n=>{
+    const b=document.createElement("button");
+    b.type="button"; b.className="lily-pad"; b.dataset.number=n;
+    b.innerHTML=`<strong>${n}</strong>`;
+    b.addEventListener("click",()=>frogJumpTo(n,b));
+    screen.querySelector("#lilyGrid").appendChild(b);
+  });
+  speakNumber(arcade.step);
+}
+
+async function frogJumpTo(n, pad) {
+  if(arcade.locked)return;
+  if(n!==arcade.step)return wrongChoice(pad);
+  pad.classList.add("visited");
+  screen.querySelectorAll(".little-frog").forEach(f => f.remove());
+  pad.insertAdjacentHTML("beforeend",'<span class="little-frog hop">🐸</span>');
+  successChoice();
+  await speakNumberNow(n);
+  if(n>=state.range){
+    arcade.locked=true; celebrate();
+    setTimeout(()=>setRoute("home"),850);
+    return;
+  }
+  arcade.step++;
+  const mission=screen.querySelector(".big-mission strong");
+  if(mission) mission.textContent=arcade.step;
+  speakNumber(arcade.step);
+}
+
+// ---------- Tower ----------
+function startTower() {
+  arcade.round=0;
+  renderTower();
+}
+
+function renderTower() {
+  pickTarget();
+  arcade.count=0; arcade.locked=false;
+  screen.innerHTML=`
+    <section class="mini-game tower-game">
+      ${missionBar("🧱", "בונים מגדל", arcade.target, `${arcade.round}/5`)}
+      <div class="tower-scene">
+        <div id="towerStack" class="tower-stack"></div>
+        <button id="addBlockBtn" class="add-block-button" type="button"><span>🧱</span><strong>+</strong></button>
+        <div id="towerCount" class="tower-count">0 / ${arcade.target}</div>
+      </div>
+    </section>`;
+  screen.querySelector("#addBlockBtn").addEventListener("click",addTowerBlock);
+  speakNumber(arcade.target);
+}
+
+async function addTowerBlock() {
+  if(arcade.locked)return;
+  arcade.count++;
+  const block=document.createElement("div");
+  block.className="tower-block";
+  block.style.setProperty("--block-color",COLORS[(arcade.count-1)%COLORS.length]);
+  block.textContent=arcade.count;
+  screen.querySelector("#towerStack").appendChild(block);
+  screen.querySelector("#towerCount").textContent=`${arcade.count} / ${arcade.target}`;
+  playTone(400+arcade.count*35,.08);
+  speakNumberNow(arcade.count);
+  if(arcade.count>=arcade.target){
+    arcade.locked=true; successChoice();
+    nextArcadeRound("tower",renderTower,750);
+  }
+}
+
+// ---------- Runaway number ----------
+function startRunaway() {
+  arcade.round=0;
+  renderRunaway();
+}
+
+function renderRunaway() {
+  pickTarget();
+  arcade.locked=false;
+  screen.innerHTML=`
+    <section class="mini-game runaway-game">
+      ${missionBar("💨", "המספר הבורח", arcade.target, `${arcade.round}/5`)}
+      <div id="runawayArena" class="runaway-arena"></div>
+    </section>`;
+  choiceNumbers(arcade.target,4).forEach((n,i)=>{
+    const b=document.createElement("button");
+    b.type="button"; b.className="runaway-number"; b.dataset.number=n; b.textContent=n;
+    b.addEventListener("click",async()=>{
+      if(arcade.locked)return;
+      if(n!==arcade.target)return wrongChoice(b);
+      arcade.locked=true; b.classList.add("caught-runaway"); successChoice();
+      clearInterval(arcadeTimer); arcadeTimer=null;
+      await speakNumberNow(n); nextArcadeRound("runaway",renderRunaway,550);
+    });
+    screen.querySelector("#runawayArena").appendChild(b);
+  });
+  moveRunawayNumbers();
+  arcadeTimer=setInterval(moveRunawayNumbers,900);
+  speakNumber(arcade.target);
+}
+
+function moveRunawayNumbers() {
+  const arena=screen.querySelector("#runawayArena");
+  if(!arena)return;
+  arena.querySelectorAll(".runaway-number").forEach((b,i)=>{
+    const x=8+Math.random()*76;
+    const y=8+Math.random()*70;
+    b.style.left=`${x}%`; b.style.top=`${y}%`;
+    b.style.transform=`translate(-50%,-50%) rotate(${Math.round(Math.random()*18-9)}deg)`;
+  });
 }
 
 // ---------- Number race ----------
@@ -633,6 +1196,7 @@ async function checkCatchNumber(number, button) {
 }
 
 // ---------- Number train ----------
+
 function startTrain() {
   state.trainOrder = shuffle(numbersInRange());
   state.trainRound = 0;
@@ -809,73 +1373,18 @@ async function completeTrainRound(wagon, target) {
   renderTrain();
 }
 
-// ---------- Missing number ----------
-function renderMissing(newRound = false) {
-  screen.replaceChildren(cloneTemplate("missing-template"));
-  if (newRound) state.missingNumber = randomItem(numbersInRange());
-  screen.querySelector("#missingScore").textContent = state.missingScore;
-  const train = screen.querySelector("#missingTrain");
-  const choices = screen.querySelector("#answerChoices");
-  if (state.range > 6) train.classList.add("wide-sequence");
 
-  numbersInRange().forEach(n => {
-    const car = document.createElement("div");
-    car.className = `missing-car ${n === state.missingNumber ? "blank" : ""}`.trim();
-    car.style.setProperty("--wagon-color", COLORS[n - 1]);
-    car.textContent = n === state.missingNumber ? "?" : String(n);
-    train.appendChild(car);
-  });
-
-  const distractors = numbersInRange().filter(n => n !== state.missingNumber);
-  const values = shuffle([state.missingNumber, ...shuffle(distractors).slice(0, 2)]);
-  values.forEach(n => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "answer-button";
-    button.textContent = n;
-    button.addEventListener("click", () => checkMissingAnswer(n, button));
-    choices.appendChild(button);
-  });
-  speak("איזה מספר חסר ברכבת?");
-  const repeatMissingBtn = screen.querySelector("#repeatMissingBtn");
-  if (repeatMissingBtn) repeatMissingBtn.addEventListener("click", () => speakNow("איזה מספר חסר ברכבת?"));
-}
-
-async function checkMissingAnswer(number, button) {
-  if (button.parentElement?.dataset.locked === "true") return;
-  if (number === state.missingNumber) {
-    button.parentElement.dataset.locked = "true";
-    button.classList.add("right");
-    state.missingScore++;
-    safeSet("numberTrainMissingScore", String(state.missingScore));
-    celebrate();
-    showToast(`נכון! המספר החסר הוא ${number}`, "success");
-    await speakNumberNow(number);
-    if (state.route !== "missing") return;
-    await sleep(160);
-    renderMissing(true);
-  } else {
-    button.classList.remove("nope");
-    void button.offsetWidth;
-    button.classList.add("nope");
-    playTone(180, 0.18);
-    showToast("כמעט, נסו מספר אחר");
-    await speakNow("כמעט. נסו מספר אחר.");
-  }
-}
 
 if ("speechSynthesis" in window) {
   refreshHebrewVoice();
   if (typeof window.speechSynthesis.addEventListener === "function") {
     window.speechSynthesis.addEventListener("voiceschanged", refreshHebrewVoice);
   }
-  // Voice lists often arrive late on Android/Chrome.
   setTimeout(refreshHebrewVoice, 250);
   setTimeout(refreshHebrewVoice, 1000);
   setTimeout(refreshHebrewVoice, 2500);
 }
 
-// First real touch/click primes Android media. It never blocks the game.
 document.addEventListener("pointerdown", primeAudioFromGesture, { capture: true });
 document.addEventListener("touchstart", primeAudioFromGesture, { capture: true, passive: true });
 

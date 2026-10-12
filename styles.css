@@ -110,3 +110,164 @@
   .hero-card { grid-template-columns: 1fr; }
   .race-heading { grid-template-columns: 1fr auto; }
 }
+
+
+/* ===== V16: Number Arcade ===== */
+.arcade-home { gap: 22px; }
+.arcade-hero { align-items:center; }
+.hero-arcade { font-size: clamp(34px, 5vw, 66px); white-space: nowrap; letter-spacing: .08em; }
+.game-section { display:grid; gap:12px; }
+.section-title { display:flex; align-items:center; gap:10px; font-size:1.18rem; padding-inline:6px; }
+.section-title span { font-size:1.35em; }
+.arcade-grid { grid-template-columns: repeat(auto-fit,minmax(170px,1fr)); }
+.favorite-game { position:relative; outline:3px solid rgba(244,201,93,.42); }
+.favorite-badge { position:absolute; top:8px; left:8px; font-size:.72rem; border-radius:999px; padding:4px 8px; background:#fff4c6; color:#6f5600; }
+.mini-game { display:grid; gap:22px; min-height:560px; align-content:start; }
+.arcade-heading { display:grid; grid-template-columns:1fr auto auto; gap:16px; align-items:center; }
+.arcade-title { display:flex; align-items:center; gap:12px; min-width:0; }
+.arcade-title > span { font-size:44px; }
+.arcade-title h1 { margin:2px 0 0; }
+.big-mission { min-width:116px; height:96px; border-radius:28px; display:flex; align-items:center; justify-content:center; gap:8px; background:#fff; border:4px solid var(--accent,#5aa9e6); box-shadow:0 8px 18px rgba(0,0,0,.08); }
+.big-mission strong { font-size:56px; line-height:1; }
+.mission-mini { font-size:24px; }
+.mini-score { background:#fff; border:2px solid var(--border,#e6e6e6); padding:10px 14px; border-radius:18px; font-weight:800; }
+
+/* bridge */
+.bridge-scene { position:relative; min-height:220px; display:flex; align-items:center; justify-content:center; overflow:hidden; border-radius:30px; background:linear-gradient(#dff4ff 0 52%,#8dd7ef 52% 100%); }
+.bridge-water { position:absolute; inset:auto 0 14px; text-align:center; font-size:42px; opacity:.65; letter-spacing:.25em; }
+.bridge-row { display:flex; gap:8px; align-items:center; justify-content:center; padding:24px; z-index:1; max-width:100%; overflow-x:auto; }
+.bridge-plank,.bridge-gap { flex:0 0 82px; height:92px; border-radius:18px; display:grid; place-items:center; font-size:40px; font-weight:900; }
+.bridge-plank { background:#c88d52; border:5px solid #8c5b2c; color:#fff; box-shadow:inset 0 -10px rgba(0,0,0,.08); }
+.bridge-gap { background:rgba(255,255,255,.4); border:5px dashed #3a83a5; position:relative; }
+.bridge-gap::after { content:"↓"; font-size:42px; color:#23647f; animation:bridgeHint .8s ease-in-out infinite alternate; }
+.bridge-filled { animation:bridgeFill .45s ease; }
+.choice-label { text-align:center; font-weight:800; font-size:1.1rem; }
+.rock-choices { display:flex; gap:18px; justify-content:center; flex-wrap:wrap; }
+.rock-choice { width:112px; height:92px; border:none; border-radius:48% 52% 45% 55%; background:#9aa3aa; color:#fff; font-size:42px; font-weight:900; box-shadow:inset 0 -8px rgba(0,0,0,.12),0 8px 16px rgba(0,0,0,.12); }
+
+/* frog */
+.frog-pond { min-height:410px; position:relative; overflow:hidden; border-radius:32px; background:linear-gradient(#dff7ff 0 55%,#7ccf8b 55% 100%); }
+.fly-zone { position:absolute; inset:12px 12px 150px; }
+.number-fly { position:absolute; border:none; background:transparent; display:flex; align-items:center; gap:4px; font-size:54px; animation:floatFly 2.2s ease-in-out infinite alternate; }
+.number-fly strong { display:grid; place-items:center; width:62px; height:62px; border-radius:50%; background:#fff; border:4px solid #222; font-size:34px; }
+.fly-1{left:7%;top:15%}.fly-2{left:35%;top:3%;animation-delay:.3s}.fly-3{right:25%;top:20%;animation-delay:.6s}.fly-4{right:4%;top:2%;animation-delay:.9s}
+.frog-wrap { position:absolute; bottom:20px; left:50%; transform:translateX(-50%); }
+.big-frog { font-size:116px; position:relative; z-index:2; }
+.frog-tongue { position:absolute; width:16px; height:0; background:#ff6f91; border-radius:999px; left:50%; bottom:76px; transform:translateX(-50%); transform-origin:bottom; z-index:1; }
+.shoot-tongue { animation:tongueShoot .45s ease; }
+.frog-eaten { animation:eatenFly .5s forwards !important; }
+
+/* cannon */
+.cannon-field { min-height:430px; border-radius:32px; position:relative; overflow:hidden; background:linear-gradient(#dff4ff,#f6fbff 68%,#c5e8a6 68%); }
+.balloon-targets { position:absolute; inset:18px 22px 150px; display:flex; align-items:flex-start; justify-content:space-around; gap:10px; }
+.balloon-number { border:none; background:transparent; display:grid; place-items:center; position:relative; animation:balloonBob 1.8s ease-in-out infinite alternate; }
+.balloon-number span { font-size:92px; filter:drop-shadow(0 6px 4px rgba(0,0,0,.12)); }
+.balloon-number strong { position:absolute; top:26px; color:#fff; font-size:36px; text-shadow:0 2px 3px rgba(0,0,0,.35); }
+.balloon-2{animation-delay:.3s}.balloon-3{animation-delay:.6s}.balloon-4{animation-delay:.9s}
+.balloon-pop { animation:balloonPop .42s forwards !important; }
+.cannon-wrap { position:absolute; bottom:24px; left:50%; width:150px; height:110px; transform:translateX(-50%); }
+.cannon-wheel { width:82px; height:82px; border-radius:50%; background:#6e533f; border:12px solid #3b2d22; position:absolute; bottom:0; left:34px; }
+.cannon-barrel { width:110px; height:38px; border-radius:20px; background:#4f5964; position:absolute; left:64px; top:18px; transform:rotate(-55deg); transform-origin:left center; z-index:2; }
+.cannon-fire { animation:cannonKick .3s ease; }
+
+/* obstacle */
+.obstacle-course { display:grid; gap:24px; }
+.obstacle-road { position:relative; min-height:170px; border-radius:28px; background:#4a4d50; overflow:hidden; border:14px solid #9bd272; }
+.obstacle-road::after { content:""; position:absolute; top:50%; left:0; right:0; border-top:6px dashed #fff; opacity:.8; }
+.obstacle-car { position:absolute; bottom:28px; font-size:64px; z-index:2; transition:right .45s ease; }
+.obstacle-finish { position:absolute; left:18px; top:18px; font-size:58px; z-index:2; }
+.obstacle-boost { animation:carBoost .5s ease; }
+.gate-title { text-align:center; font-weight:900; }
+.number-gates { display:flex; justify-content:center; gap:20px; flex-wrap:wrap; }
+.number-gate { width:150px; height:150px; border:6px solid #55606c; border-radius:20px 20px 8px 8px; background:#e8edf1; position:relative; display:grid; place-items:center; overflow:hidden; }
+.number-gate strong { font-size:54px; z-index:2; }
+.gate-bars { position:absolute; inset:0; display:grid; place-items:center; font-size:160px; color:#7c8791; opacity:.45; }
+.gate-open { animation:gateOpen .55s forwards; }
+
+/* parking */
+.parking-lot { padding:24px; border-radius:30px; background:#51565a; display:grid; gap:24px; }
+.parking-grid { display:grid; grid-template-columns:repeat(4,minmax(120px,1fr)); gap:18px; }
+.parking-spot { min-height:180px; border:6px solid #fff; border-radius:14px; background:transparent; color:#fff; display:grid; place-items:center; }
+.parking-spot span { font-size:38px; }
+.parking-spot strong { font-size:54px; }
+.parking-spot.parked { background:#3f8f5c; }
+.parked-car { font-size:72px !important; }
+.parking-car-area { background:#e8f0f3; border-radius:20px; padding:14px; display:flex; align-items:center; justify-content:center; gap:12px; color:#29333a; font-weight:800; }
+.parking-car { border:none; background:transparent; font-size:76px; touch-action:none; }
+.parking-car-ghost { position:fixed; z-index:9999; pointer-events:none; transform:translate(-50%,-50%); font-size:80px; }
+
+/* monster */
+.monster-scene { display:grid; grid-template-columns:minmax(220px,1fr) 1.5fr; gap:28px; align-items:center; min-height:420px; }
+.monster-character { font-size:180px; text-align:center; position:relative; transition:transform .25s; }
+.monster-happy { animation:monsterHappy .5s ease 2; }
+.belly-count { font-size:30px; font-weight:900; background:#fff; color:#222; padding:8px 14px; border-radius:20px; width:max-content; margin:-26px auto 0; position:relative; z-index:2; }
+.cookie-tray,.animal-tray { display:flex; flex-wrap:wrap; gap:12px; align-content:center; justify-content:center; padding:22px; border-radius:26px; background:#fff7df; min-height:220px; }
+.food-item,.animal-item { border:none; background:transparent; font-size:66px; }
+.food-item.used,.animal-item.used { opacity:.15; transform:scale(.65); pointer-events:none; }
+
+/* fishing */
+.sea-scene { position:relative; min-height:430px; border-radius:32px; overflow:hidden; background:linear-gradient(#e2f7ff 0 18%,#63c7e8 18% 100%); }
+.water-line { position:absolute; top:55px; left:0; right:0; text-align:center; font-size:44px; opacity:.6; }
+.fish-zone { position:absolute; inset:90px 14px 14px; }
+.number-fish { position:absolute; border:none; background:transparent; display:flex; align-items:center; gap:6px; font-size:72px; animation:fishSwim 3s ease-in-out infinite alternate; }
+.number-fish strong { width:62px; height:62px; border-radius:50%; display:grid; place-items:center; background:#fff; border:4px solid #1b7695; font-size:34px; }
+.fish-1{left:5%;top:8%}.fish-2{left:32%;top:50%;animation-delay:.5s}.fish-3{right:28%;top:16%;animation-delay:1s}.fish-4{right:5%;top:58%;animation-delay:1.4s}
+.fish-caught { animation:fishCaught .5s forwards !important; }
+
+/* rescue */
+.rescue-scene { display:grid; gap:26px; }
+.rescue-train { display:flex; align-items:end; justify-content:center; font-size:100px; }
+.rescue-wagon { min-width:250px; min-height:150px; border:7px solid #755337; background:#e7b16f; border-radius:22px 22px 36px 36px; display:grid; align-content:center; justify-items:center; }
+.rescue-wagon > strong { font-size:54px; }
+.rescued-animals { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; font-size:38px; max-width:230px; }
+
+/* frog jump */
+.lily-pond { min-height:470px; border-radius:32px; padding:26px; background:linear-gradient(#68c8e9,#58b9d8); }
+.lily-grid { display:grid; grid-template-columns:repeat(5,minmax(100px,1fr)); gap:18px; }
+.lily-pad { min-height:120px; border:none; border-radius:52% 48% 55% 45%; background:#68b85f; color:#fff; position:relative; box-shadow:inset -8px -10px rgba(0,0,0,.08),0 8px 14px rgba(0,0,0,.12); }
+.lily-pad strong { font-size:46px; }
+.lily-pad.visited { background:#3e8f52; outline:5px solid #fff4a8; }
+.little-frog { position:absolute; font-size:44px; bottom:4px; right:6px; }
+.little-frog.hop { animation:frogHop .45s ease; }
+
+/* tower */
+.tower-scene { min-height:470px; display:grid; grid-template-columns:1fr auto; grid-template-rows:1fr auto; gap:18px; align-items:end; justify-items:center; padding:24px; border-radius:32px; background:linear-gradient(#eaf7ff,#f7fbff); }
+.tower-stack { min-height:360px; display:flex; flex-direction:column-reverse; align-items:center; justify-content:flex-start; gap:4px; grid-row:1 / span 2; }
+.tower-block { width:160px; height:42px; background:var(--block-color); border-radius:8px; border:3px solid rgba(0,0,0,.14); display:grid; place-items:center; color:#fff; font-size:24px; font-weight:900; animation:blockDrop .32s ease; }
+.add-block-button { width:150px; height:120px; border:none; border-radius:26px; background:#fff3c9; font-size:54px; display:flex; align-items:center; justify-content:center; gap:8px; }
+.add-block-button strong { font-size:46px; }
+.tower-count { font-size:32px; font-weight:900; }
+
+/* runaway */
+.runaway-arena { min-height:500px; position:relative; overflow:hidden; border-radius:32px; background:radial-gradient(circle at 20% 20%,#fff7d0,transparent 25%),linear-gradient(135deg,#e9f8ff,#f9edff); }
+.runaway-number { position:absolute; width:100px; height:100px; border:none; border-radius:50%; background:#fff; box-shadow:0 10px 20px rgba(0,0,0,.14); font-size:48px; font-weight:900; transition:left .55s ease,top .55s ease,transform .55s ease; }
+.caught-runaway { animation:caughtRunaway .45s forwards; }
+
+.arcade-wrong { animation:wrongShake .35s ease; outline:5px solid #ef6f6c !important; }
+
+/* animations */
+@keyframes bridgeHint{to{transform:translateY(8px)}} @keyframes bridgeFill{0%{transform:translateY(-70px) rotate(-12deg);opacity:0}100%{transform:none;opacity:1}}
+@keyframes floatFly{to{transform:translate(12px,-10px) rotate(4deg)}} @keyframes tongueShoot{50%{height:190px}100%{height:0}} @keyframes eatenFly{to{transform:translate(0,180px) scale(.1);opacity:0}}
+@keyframes balloonBob{to{transform:translateY(-16px) rotate(3deg)}} @keyframes balloonPop{60%{transform:scale(1.25)}100%{transform:scale(0);opacity:0}} @keyframes cannonKick{50%{transform:rotate(-48deg) translateX(-10px)}}
+@keyframes carBoost{50%{transform:translateX(-30px) scale(1.12)}} @keyframes gateOpen{to{transform:translateY(-80px);opacity:.25}}
+@keyframes monsterHappy{50%{transform:rotate(5deg) scale(1.08)}} @keyframes fishSwim{to{transform:translateX(22px) translateY(-10px)}} @keyframes fishCaught{to{transform:translateY(-180px) scale(.35);opacity:0}}
+@keyframes frogHop{50%{transform:translateY(-34px) scale(1.15)}} @keyframes blockDrop{0%{transform:translateY(-80px);opacity:0}100%{transform:none;opacity:1}}
+@keyframes caughtRunaway{to{transform:translate(-50%,-50%) scale(1.8)!important;opacity:0}} @keyframes wrongShake{25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
+
+@media (max-width: 900px) {
+  .arcade-heading { grid-template-columns:1fr auto; }
+  .mini-score { grid-column:1/-1; justify-self:end; }
+  .parking-grid { grid-template-columns:repeat(2,1fr); }
+  .monster-scene { grid-template-columns:1fr; }
+  .monster-character { font-size:130px; }
+  .lily-grid { grid-template-columns:repeat(3,1fr); }
+}
+@media (max-width: 600px) {
+  .arcade-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .game-card { min-height:145px; }
+  .big-mission { min-width:90px;height:80px}.big-mission strong{font-size:46px}
+  .bridge-plank,.bridge-gap { flex-basis:66px;height:74px;font-size:32px }
+  .balloon-number span { font-size:72px; }
+  .number-gate { width:110px;height:120px; }
+  .runaway-number { width:82px;height:82px;font-size:40px; }
+}
